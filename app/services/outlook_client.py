@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 import time
 from urllib.parse import urlencode
 import httpx
@@ -111,7 +112,7 @@ class OutlookClient:
             "https://graph.microsoft.com/v1.0/me/messages"
             f"?$top={max_count}"
             "&$orderby=receivedDateTime desc"
-            "&$select=subject,from,bodyPreview,receivedDateTime,importance,webLink"
+            "&$select=subject,from,bodyPreview,body,receivedDateTime,importance,webLink"
         )
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -138,6 +139,7 @@ class OutlookClient:
                     sender=sender,
                     received_at=datetime.fromisoformat(received.replace("Z", "+00:00")) if received else datetime.now(timezone.utc),
                     preview=(row.get("bodyPreview") or "")[:240],
+                    body_text=self._strip_html(((row.get("body") or {}).get("content") or "")),
                     is_important=(row.get("importance") or "").lower() == "high",
                     url=row.get("webLink"),
                 )
@@ -146,3 +148,16 @@ class OutlookClient:
 
     def disconnect(self) -> None:
         self.token_store.clear()
+    @staticmethod
+    def _strip_html(html: str) -> str:
+        if not html:
+            return ""
+        text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+        text = re.sub(r"</p>|</div>|</li>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"&nbsp;", " ", text)
+        text = re.sub(r"&amp;", "&", text)
+        text = re.sub(r"\s+\n", "\n", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        return text.strip()

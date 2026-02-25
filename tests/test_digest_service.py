@@ -22,8 +22,8 @@ def make_service() -> DigestService:
         lookahead_days=7,
         important_keywords="urgent,important,deadline,exam,quiz,project",
         task_mode="action_only",
-        task_action_keywords="due,deadline,exam,quiz,submission,homework,hw,project,midterm,final",
-        task_noise_keywords="assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
+        task_action_keywords="due,deadline,exam,quiz,submission,homework,hw,project,midterm,final,participation,lab",
+        task_noise_keywords="assignment graded,graded:,office hours moved,daily digest,announcement posted",
         task_require_due=True,
         push_due_within_hours=48,
     )
@@ -151,3 +151,29 @@ def test_requires_due_filters_mail_without_deadline():
         url=None,
     )
     assert service._task_from_mail(mail, now.astimezone()) is None
+
+
+def test_extracts_multiple_tasks_from_body_due_blocks():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mail = MailItem(
+        subject="This Week's Deadlines: Chapter 5",
+        sender="notifications@instructure.com",
+        received_at=now,
+        preview="Please review weekly deadlines.",
+        body_text=(
+            "DUE TONIGHT, Monday, February 23 at 11:59 PM Central Time\n"
+            "Participation for Guest Speaker: Joe Barhoumeh, CPT\n"
+            "DUE Thursday, February 26 at 11:59 PM Central Time\n"
+            "Lipids Assignment\n"
+            "Chapter 5 Quiz\n"
+        ),
+        is_important=False,
+        url=None,
+    )
+
+    tasks = service._tasks_from_mail(mail, now.astimezone())
+    assert len(tasks) >= 2
+    titles = [t.title for t in tasks]
+    assert any("Participation for Guest Speaker" in t for t in titles)
+    assert any("Chapter 5 Quiz" in t for t in titles)

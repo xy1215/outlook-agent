@@ -18,7 +18,7 @@ class DigestService:
         lookahead_days: int,
         important_keywords: str,
         task_mode: str = "action_only",
-        task_action_keywords: str = "due,deadline,exam,quiz,submission,homework,hw,project,midterm,final",
+        task_action_keywords: str = "due,deadline,exam,quiz,submission,homework,hw,project,midterm,final,participation,lab",
         task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
         task_require_due: bool = True,
         push_due_within_hours: int = 48,
@@ -43,17 +43,18 @@ class DigestService:
     def _is_mail_important(self, mail: MailItem) -> bool:
         if mail.is_important:
             return True
-        text = f"{mail.subject} {mail.preview}".lower()
+        text = f"{mail.subject} {mail.preview} {mail.body_text[:1200]}".lower()
         return any(keyword in text for keyword in self.keywords)
 
     def _is_noise_mail(self, mail: MailItem) -> bool:
-        text = f"{mail.subject} {mail.preview}".lower()
+        # Noise filtering must be conservative: only look at subject.
+        text = mail.subject.lower()
         return any(keyword in text for keyword in self.noise_keywords)
 
     def _is_actionable(self, mail: MailItem, due_at: datetime | None) -> bool:
         if due_at is not None:
             return True
-        text = f"{mail.subject} {mail.preview}".lower()
+        text = f"{mail.subject} {mail.preview} {mail.body_text[:1200]}".lower()
         return any(keyword in text for keyword in self.action_keywords)
 
     @staticmethod
@@ -176,20 +177,102 @@ class DigestService:
         ]
         return any(word in text for word in indicators)
 
+    @staticmethod
+    def _is_action_line(line: str) -> bool:
+        l = line.strip()
+        if len(l) < 4:
+            return False
+        low = l.lower()
+        weak_starts = ("questions?", "cheers", "have a great", "view announcement", "update your notification")
+        if any(low.startswith(x) for x in weak_starts):
+            return False
+        weak_contains = ("links to an external site", "syllabus", "piazza q&a")
+        if any(x in low for x in weak_contains):
+            return False
+        return True
+
+    def _body_has_due_marker(self, body_text: str, now: datetime) -> bool:
+        for line in body_text.splitlines():
+            ln = line.strip()
+            if not ln:
+                continue
+            low = ln.lower()
+            if "due" not in low and "deadline" not in low and "tonight" not in low and "tomorrow" not in low:
+                continue
+            if self._parse_deadline_from_text(ln, now) is not None:
+                return True
+        return False
+
+    def _extract_due_blocks(self, mail: MailItem, now: datetime) -> list[TaskItem]:
+        text = (mail.body_text or "").strip()
+        if not text:
+            return []
+
+        lines = [re.sub(r"\s+", " ", ln).strip(" -\t") for ln in text.splitlines()]
+        lines = [ln for ln in lines if ln]
+        tasks: list[TaskItem] = []
+
+        for idx, line in enumerate(lines):
+            low = line.lower()
+            if "due" not in low and "deadline" not in low and "tonight" not in low and "tomorrow" not in low:
+                continue
+            due_at = self._parse_deadline_from_text(line, now)
+            if due_at is None:
+                continue
+
+            # Prefer actionable bullet lines immediately after the due marker.
+            candidates: list[str] = []
+            for j in range(idx + 1, min(idx + 6, len(lines))):
+                nxt = lines[j]
+                if self._parse_deadline_from_text(nxt, now) is not None:
+                    break
+                if self._is_action_line(nxt):
+                    candidates.append(nxt)
+
+            if not candidates:
+                continue
+
+            for cand in candidates[:3]:
+                if self.task_mode == "action_only":
+                    low_c = cand.lower()
+                    if not any(k in low_c for k in self.action_keywords):
+                        continue
+                tasks.append(
+                    TaskItem(
+                        source="outlook_canvas_mail",
+                        title=self._clean_task_title(cand),
+                        due_at=due_at,
+                        course=None,
+                        url=mail.url,
+                        priority=2,
+                    )
+                )
+        return tasks
+
     def _task_from_mail(self, mail: MailItem, now: datetime) -> TaskItem | None:
+        tasks = self._tasks_from_mail(mail, now)
+        return tasks[0] if tasks else None
+
+    def _tasks_from_mail(self, mail: MailItem, now: datetime) -> list[TaskItem]:
         if not self._looks_like_canvas_mail(mail):
-            return None
+            return []
         if self._is_noise_mail(mail):
-            return None
+            return []
+
+        block_tasks = self._extract_due_blocks(mail, now)
+        if block_tasks:
+            return block_tasks
+        if self._body_has_due_marker(mail.body_text or "", now):
+            return []
 
         subject = mail.subject.strip()
         preview = mail.preview.strip()
-        combined = f"{subject} {preview}"
+        combined = f"{subject} {preview} {mail.body_text[:1600]}"
         due_at = self._parse_deadline_from_text(combined, now)
         if self.task_mode == "action_only" and not self._is_actionable(mail, due_at):
-            return None
+            return []
         if self.task_require_due and due_at is None:
-            return None
+            return []
 
         title = subject
         patterns = [
@@ -208,14 +291,16 @@ class DigestService:
             if preview_match:
                 title = preview_match.group(1)
 
-        return TaskItem(
-            source="outlook_canvas_mail",
-            title=self._clean_task_title(title),
-            due_at=due_at,
-            course=None,
-            url=mail.url,
-            priority=2 if due_at else 1,
-        )
+        return [
+            TaskItem(
+                source="outlook_canvas_mail",
+                title=self._clean_task_title(title),
+                due_at=due_at,
+                course=None,
+                url=mail.url,
+                priority=2 if due_at else 1,
+            )
+        ]
 
     @staticmethod
     def _merge_tasks(primary: list[TaskItem], fallback: list[TaskItem]) -> list[TaskItem]:
@@ -236,7 +321,7 @@ class DigestService:
             mails = await self.outlook_client.fetch_recent_messages()
         except Exception:
             mails = []
-        tasks_from_mail = [t for t in (self._task_from_mail(mail, now) for mail in mails) if t is not None]
+        tasks_from_mail = [task for mail in mails for task in self._tasks_from_mail(mail, now)]
 
         canvas_tasks: list[TaskItem] = []
         try:

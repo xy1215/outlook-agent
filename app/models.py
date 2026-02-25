@@ -20,6 +20,7 @@ class MailItem(BaseModel):
     sender: str
     received_at: datetime
     preview: str = ""
+    body_text: str = ""
     is_important: bool = False
     url: Optional[str] = None
 
