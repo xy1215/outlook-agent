@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Campus Daily Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="hero">
+        <h1>Campus Daily Agent</h1>
+        <p>每天自动汇总 Canvas + Outlook，主动推送到 iPhone。</p>
+        <div class="meta">定时: <span id="schedule">{{ schedule_time }} ({{ timezone }})</span></div>
+        <div class="actions">
+          <button id="refresh">刷新摘要</button>
+          <button id="runNow">立即执行并推送</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>今日摘要</h2>
+        <p id="summary">加载中...</p>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h3>待办任务</h3>
+          <ul id="tasks"></ul>
+        </article>
+        <article class="card">
+          <h3>重要邮件</h3>
+          <ul id="mails"></ul>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
