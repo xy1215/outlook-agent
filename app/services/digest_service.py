@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from app.models import DailyDigest, MailItem, TaskItem
 from app.services.canvas_client import CanvasClient
+from app.services.llm_client import LLMTaskExtractor
 from app.services.outlook_client import OutlookClient
 
 
@@ -19,9 +20,12 @@ class DigestService:
         important_keywords: str,
         task_mode: str = "action_only",
         task_action_keywords: str = "due,deadline,exam,quiz,submission,homework,hw,project,midterm,final,participation,lab",
-        task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
+        task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,announcement posted",
         task_require_due: bool = True,
         push_due_within_hours: int = 48,
+        llm_enabled: bool = False,
+        llm_max_mails: int = 8,
+        llm_client: LLMTaskExtractor | None = None,
     ) -> None:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
@@ -33,6 +37,9 @@ class DigestService:
         self.noise_keywords = [k.strip().lower() for k in task_noise_keywords.split(",") if k.strip()]
         self.task_require_due = task_require_due
         self.push_due_within_hours = push_due_within_hours
+        self.llm_enabled = llm_enabled
+        self.llm_max_mails = llm_max_mails
+        self.llm_client = llm_client
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -322,6 +329,20 @@ class DigestService:
         except Exception:
             mails = []
         tasks_from_mail = [task for mail in mails for task in self._tasks_from_mail(mail, now)]
+        llm_tasks: list[TaskItem] = []
+        if self.llm_enabled and self.llm_client and self.llm_client.is_configured():
+            llm_candidates = [m for m in mails if self._looks_like_canvas_mail(m) and not self._is_noise_mail(m)]
+            for mail in llm_candidates[: self.llm_max_mails]:
+                try:
+                    extracted = await self.llm_client.extract_tasks_from_mail(mail, self.timezone_name)
+                except Exception:
+                    extracted = []
+                for task in extracted:
+                    if self.task_require_due and task.due_at is None:
+                        continue
+                    if not self._is_due_soon(task, now):
+                        continue
+                    llm_tasks.append(task)
 
         canvas_tasks: list[TaskItem] = []
         try:
@@ -330,7 +351,8 @@ class DigestService:
             # Canvas is optional; mail-derived tasks are the primary source.
             canvas_tasks = []
 
-        tasks = self._merge_tasks(tasks_from_mail, canvas_tasks)
+        tasks = self._merge_tasks(tasks_from_mail, llm_tasks)
+        tasks = self._merge_tasks(tasks, canvas_tasks)
 
         due_tasks = [t for t in tasks if self._is_due_soon(t, now)]
         important_mails = [m for m in mails if self._is_mail_important(m)]

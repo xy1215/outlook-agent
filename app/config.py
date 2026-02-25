@@ -36,5 +36,12 @@ class Settings(BaseSettings):
     task_require_due: bool = Field(default=True, alias="TASK_REQUIRE_DUE")
     push_due_within_hours: int = Field(default=48, alias="PUSH_DUE_WITHIN_HOURS")
 
+    llm_enabled: bool = Field(default=False, alias="LLM_ENABLED")
+    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
+    llm_timeout_sec: int = Field(default=20, alias="LLM_TIMEOUT_SEC")
+    llm_max_mails: int = Field(default=8, alias="LLM_MAX_MAILS")
+
 
 settings = Settings()

@@ -67,6 +67,8 @@ uvicorn app.main:app --reload --port 8000
 - `TASK_NOISE_KEYWORDS` 过滤噪音通知（如 Assignment Graded）
 - `TASK_REQUIRE_DUE=true` 左栏仅展示带截止日期的任务
 - `PUSH_DUE_WITHIN_HOURS=48` 仅推送 48 小时内截止任务
+- `LLM_ENABLED=true` 可开启 LLM 二阶段提取（从长正文中补抓 deadline 任务）
+- `LLM_MAX_MAILS=8` 控制每次最多送入 LLM 的邮件数
 
 ## 4. Web 页面功能
 
