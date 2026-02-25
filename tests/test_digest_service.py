@@ -24,6 +24,7 @@ def make_service() -> DigestService:
         task_mode="action_only",
         task_action_keywords="due,deadline,exam,quiz,submission,homework,hw,project,midterm,final",
         task_noise_keywords="assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
+        task_require_due=True,
         push_due_within_hours=48,
     )
 
@@ -69,6 +70,22 @@ def test_extract_task_due_from_us_style_date_in_preview():
     assert task.due_at is not None
     assert task.due_at.month == 3
     assert task.due_at.day == 8
+
+
+def test_extract_task_due_from_today_time_phrase():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mail = MailItem(
+        subject="Make-up exam today at 5:45 PM",
+        sender="notifications@instructure.com",
+        received_at=now,
+        preview="Exam will be held today at 5:45 PM in room B239.",
+        is_important=False,
+        url=None,
+    )
+    task = service._task_from_mail(mail, now.astimezone())
+    assert task is not None
+    assert task.due_at is not None
 
 
 def test_non_canvas_mail_does_not_become_task():
@@ -120,3 +137,17 @@ def test_push_text_only_includes_due_tasks_within_window():
     assert "Near due" in text
     assert "Far due" not in text
     assert "No due" not in text
+
+
+def test_requires_due_filters_mail_without_deadline():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mail = MailItem(
+        subject="Quiz discussion this week",
+        sender="notifications@instructure.com",
+        received_at=now,
+        preview="Please prepare for upcoming discussion.",
+        is_important=False,
+        url=None,
+    )
+    assert service._task_from_mail(mail, now.astimezone()) is None

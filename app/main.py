@@ -39,6 +39,7 @@ digest_service = DigestService(
     settings.task_mode,
     settings.task_action_keywords,
     settings.task_noise_keywords,
+    settings.task_require_due,
     settings.push_due_within_hours,
 )
 scheduler = create_scheduler(settings.timezone)

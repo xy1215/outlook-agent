@@ -65,6 +65,7 @@ uvicorn app.main:app --reload --port 8000
 - `TIMEZONE=America/Los_Angeles`
 - `TASK_MODE=action_only` 只保留可行动任务（建议）
 - `TASK_NOISE_KEYWORDS` 过滤噪音通知（如 Assignment Graded）
+- `TASK_REQUIRE_DUE=true` 左栏仅展示带截止日期的任务
 - `PUSH_DUE_WITHIN_HOURS=48` 仅推送 48 小时内截止任务
 
 ## 4. Web 页面功能

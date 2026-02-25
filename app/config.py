@@ -33,6 +33,7 @@ class Settings(BaseSettings):
         default="assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
         alias="TASK_NOISE_KEYWORDS",
     )
+    task_require_due: bool = Field(default=True, alias="TASK_REQUIRE_DUE")
     push_due_within_hours: int = Field(default=48, alias="PUSH_DUE_WITHIN_HOURS")
 
 

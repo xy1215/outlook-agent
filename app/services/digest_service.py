@@ -20,6 +20,7 @@ class DigestService:
         task_mode: str = "action_only",
         task_action_keywords: str = "due,deadline,exam,quiz,submission,homework,hw,project,midterm,final",
         task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
+        task_require_due: bool = True,
         push_due_within_hours: int = 48,
     ) -> None:
         self.canvas_client = canvas_client
@@ -30,11 +31,12 @@ class DigestService:
         self.task_mode = (task_mode or "action_only").strip().lower()
         self.action_keywords = [k.strip().lower() for k in task_action_keywords.split(",") if k.strip()]
         self.noise_keywords = [k.strip().lower() for k in task_noise_keywords.split(",") if k.strip()]
+        self.task_require_due = task_require_due
         self.push_due_within_hours = push_due_within_hours
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
-            return True
+            return not self.task_require_due
         due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
         return due_local <= now + timedelta(days=self.lookahead_days)
 
@@ -61,6 +63,27 @@ class DigestService:
 
     def _parse_deadline_from_text(self, text: str, now: datetime) -> datetime | None:
         local_tz = ZoneInfo(self.timezone_name)
+        text_l = text.lower()
+
+        rel_match = re.search(r"\b(today|tomorrow)\b(?:\s+(?:at\s+)?)?(\d{1,2}:\d{2})?\s*(am|pm|AM|PM)?", text)
+        if rel_match:
+            day_word = rel_match.group(1).lower()
+            time_part = rel_match.group(2)
+            ampm = rel_match.group(3)
+            base = now.astimezone(local_tz)
+            if day_word == "tomorrow":
+                base = base + timedelta(days=1)
+            hour, minute = 23, 59
+            if time_part:
+                t = datetime.strptime(time_part, "%H:%M")
+                hour, minute = t.hour, t.minute
+                if ampm:
+                    ampm_l = ampm.lower()
+                    if ampm_l == "pm" and hour != 12:
+                        hour += 12
+                    if ampm_l == "am" and hour == 12:
+                        hour = 0
+            return base.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
         # ISO-like: 2026-03-08 23:59 or 2026-03-08
         iso_match = re.search(r"(20\d{2}-\d{1,2}-\d{1,2})(?:\s+(\d{1,2}:\d{2}))?", text)
@@ -106,7 +129,7 @@ class DigestService:
             r"\b("
             r"Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|"
             r"Oct|October|Nov|November|Dec|December"
-            r")\s+(\d{1,2})(?:,\s*(20\d{2}))?(?:\s+(\d{1,2}:\d{2})\s*(AM|PM|am|pm)?)?",
+            r")\s+(\d{1,2})(?:,\s*(20\d{2}))?(?:\s+(?:at\s+)?(\d{1,2}:\d{2})\s*(AM|PM|am|pm)?)?",
             text,
         )
         if month_match:
@@ -133,6 +156,9 @@ class DigestService:
                 return parsed
             except ValueError:
                 return None
+
+        if "midnight" in text_l:
+            return now.astimezone(local_tz).replace(hour=23, minute=59, second=0, microsecond=0)
         return None
 
     def _looks_like_canvas_mail(self, mail: MailItem) -> bool:
@@ -161,6 +187,8 @@ class DigestService:
         combined = f"{subject} {preview}"
         due_at = self._parse_deadline_from_text(combined, now)
         if self.task_mode == "action_only" and not self._is_actionable(mail, due_at):
+            return None
+        if self.task_require_due and due_at is None:
             return None
 
         title = subject

@@ -33,13 +33,13 @@ async function loadDigest() {
   tasks.innerHTML = '';
   if (!data.tasks.length) {
     const li = document.createElement('li');
-    li.textContent = '今天没有 Canvas 待办';
+    li.textContent = '今天没有带截止时间的任务';
     tasks.appendChild(li);
   } else {
     data.tasks.forEach((task) => {
       const li = document.createElement('li');
-      const due = task.due_at ? new Date(task.due_at).toLocaleString() : '无截止时间';
-      li.innerHTML = `${task.title} (${due}) ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}`;
+      const due = task.due_at ? new Date(task.due_at).toLocaleString() : '待定';
+      li.innerHTML = `<strong>${due}</strong> | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}`;
       tasks.appendChild(li);
     });
   }
