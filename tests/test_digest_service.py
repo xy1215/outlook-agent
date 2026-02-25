@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from app.models import MailItem
+from app.models import DailyDigest, MailItem, TaskItem
 from app.services.digest_service import DigestService
 
 
@@ -21,6 +21,10 @@ def make_service() -> DigestService:
         timezone_name="America/Los_Angeles",
         lookahead_days=7,
         important_keywords="urgent,important,deadline,exam,quiz,project",
+        task_mode="action_only",
+        task_action_keywords="due,deadline,exam,quiz,submission,homework,hw,project,midterm,final",
+        task_noise_keywords="assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
+        push_due_within_hours=48,
     )
 
 
@@ -82,3 +86,37 @@ def test_non_canvas_mail_does_not_become_task():
 
     task = service._task_from_mail(mail, now.astimezone())
     assert task is None
+
+
+def test_assignment_graded_is_filtered_as_noise():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mail = MailItem(
+        subject="Assignment Graded: Quiz 2",
+        sender="notifications@instructure.com",
+        received_at=now,
+        preview="Your assignment has been graded.",
+        is_important=False,
+        url=None,
+    )
+    assert service._task_from_mail(mail, now.astimezone()) is None
+
+
+def test_push_text_only_includes_due_tasks_within_window():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    digest = DailyDigest(
+        generated_at=now,
+        date_label="2026-02-25",
+        tasks=[
+            TaskItem(source="outlook_canvas_mail", title="Near due", due_at=datetime(2026, 2, 26, 0, 0, tzinfo=timezone.utc)),
+            TaskItem(source="outlook_canvas_mail", title="Far due", due_at=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc)),
+            TaskItem(source="outlook_canvas_mail", title="No due", due_at=None),
+        ],
+        important_mails=[],
+        summary_text="s",
+    )
+    text = service.to_push_text(digest)
+    assert "Near due" in text
+    assert "Far due" not in text
+    assert "No due" not in text

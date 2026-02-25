@@ -36,6 +36,10 @@ digest_service = DigestService(
     settings.timezone,
     settings.digest_lookahead_days,
     settings.important_keywords,
+    settings.task_mode,
+    settings.task_action_keywords,
+    settings.task_noise_keywords,
+    settings.push_due_within_hours,
 )
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None
@@ -47,7 +51,7 @@ async def run_daily_job() -> dict:
     digest = await digest_service.build()
     latest_digest = digest
     try:
-        await notifier.send("校园每日提醒", DigestService.to_push_text(digest))
+        await notifier.send("校园每日提醒", digest_service.to_push_text(digest))
         return {"push_sent": True}
     except Exception as exc:
         return {"push_sent": False, "error": str(exc)}

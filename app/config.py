@@ -24,6 +24,16 @@ class Settings(BaseSettings):
 
     digest_lookahead_days: int = Field(default=3, alias="DIGEST_LOOKAHEAD_DAYS")
     important_keywords: str = Field(default="urgent,important,deadline,exam,quiz,project", alias="IMPORTANT_KEYWORDS")
+    task_mode: str = Field(default="action_only", alias="TASK_MODE")
+    task_action_keywords: str = Field(
+        default="due,deadline,exam,quiz,submission,homework,hw,project,midterm,final",
+        alias="TASK_ACTION_KEYWORDS",
+    )
+    task_noise_keywords: str = Field(
+        default="assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
+        alias="TASK_NOISE_KEYWORDS",
+    )
+    push_due_within_hours: int = Field(default=48, alias="PUSH_DUE_WITHIN_HOURS")
 
 
 settings = Settings()

@@ -10,12 +10,27 @@ from app.services.outlook_client import OutlookClient
 
 
 class DigestService:
-    def __init__(self, canvas_client: CanvasClient, outlook_client: OutlookClient, timezone_name: str, lookahead_days: int, important_keywords: str) -> None:
+    def __init__(
+        self,
+        canvas_client: CanvasClient,
+        outlook_client: OutlookClient,
+        timezone_name: str,
+        lookahead_days: int,
+        important_keywords: str,
+        task_mode: str = "action_only",
+        task_action_keywords: str = "due,deadline,exam,quiz,submission,homework,hw,project,midterm,final",
+        task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
+        push_due_within_hours: int = 48,
+    ) -> None:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
         self.timezone_name = timezone_name
         self.lookahead_days = lookahead_days
         self.keywords = [k.strip().lower() for k in important_keywords.split(",") if k.strip()]
+        self.task_mode = (task_mode or "action_only").strip().lower()
+        self.action_keywords = [k.strip().lower() for k in task_action_keywords.split(",") if k.strip()]
+        self.noise_keywords = [k.strip().lower() for k in task_noise_keywords.split(",") if k.strip()]
+        self.push_due_within_hours = push_due_within_hours
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -28,6 +43,16 @@ class DigestService:
             return True
         text = f"{mail.subject} {mail.preview}".lower()
         return any(keyword in text for keyword in self.keywords)
+
+    def _is_noise_mail(self, mail: MailItem) -> bool:
+        text = f"{mail.subject} {mail.preview}".lower()
+        return any(keyword in text for keyword in self.noise_keywords)
+
+    def _is_actionable(self, mail: MailItem, due_at: datetime | None) -> bool:
+        if due_at is not None:
+            return True
+        text = f"{mail.subject} {mail.preview}".lower()
+        return any(keyword in text for keyword in self.action_keywords)
 
     @staticmethod
     def _clean_task_title(raw: str) -> str:
@@ -128,11 +153,15 @@ class DigestService:
     def _task_from_mail(self, mail: MailItem, now: datetime) -> TaskItem | None:
         if not self._looks_like_canvas_mail(mail):
             return None
+        if self._is_noise_mail(mail):
+            return None
 
         subject = mail.subject.strip()
         preview = mail.preview.strip()
         combined = f"{subject} {preview}"
         due_at = self._parse_deadline_from_text(combined, now)
+        if self.task_mode == "action_only" and not self._is_actionable(mail, due_at):
+            return None
 
         title = subject
         patterns = [
@@ -209,10 +238,20 @@ class DigestService:
             summary_text=summary,
         )
 
-    @staticmethod
-    def to_push_text(digest: DailyDigest) -> str:
+    def to_push_text(self, digest: DailyDigest) -> str:
+        now = digest.generated_at
+        due_limit = now + timedelta(hours=self.push_due_within_hours)
+        due_floor = now - timedelta(hours=24)
+        push_tasks = []
+        for task in digest.tasks:
+            if task.due_at is None:
+                continue
+            due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
+            if due_floor <= due_local <= due_limit:
+                push_tasks.append(task)
+
         lines = [digest.summary_text]
-        for task in digest.tasks[:5]:
+        for task in push_tasks[:5]:
             due = task.due_at.strftime("%m-%d %H:%M") if task.due_at else "无截止时间"
             lines.append(f"[任务] {task.title} | {due}")
         for mail in digest.important_mails[:3]:
