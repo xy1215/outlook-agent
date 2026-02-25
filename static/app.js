@@ -1,3 +1,28 @@
+async function loadAuthStatus() {
+  const res = await fetch('/api/auth-status');
+  const data = await res.json();
+  const authEl = document.getElementById('authStatus');
+  const connectBtn = document.getElementById('connectOutlook');
+  const disconnectBtn = document.getElementById('disconnectOutlook');
+
+  if (!data.configured) {
+    authEl.textContent = 'Outlook 连接状态: 未配置（请先填写 .env）';
+    connectBtn.disabled = true;
+    disconnectBtn.disabled = true;
+    return;
+  }
+
+  if (data.connected) {
+    authEl.textContent = 'Outlook 连接状态: 已连接';
+    connectBtn.disabled = true;
+    disconnectBtn.disabled = false;
+  } else {
+    authEl.textContent = 'Outlook 连接状态: 未连接，请点击“连接 Outlook”授权';
+    connectBtn.disabled = false;
+    disconnectBtn.disabled = true;
+  }
+}
+
 async function loadDigest() {
   const res = await fetch('/api/today');
   const data = await res.json();
@@ -39,9 +64,14 @@ async function runNow() {
   btn.disabled = true;
   btn.textContent = '执行中...';
   try {
-    await fetch('/api/run-now', { method: 'POST' });
+    const res = await fetch('/api/run-now', { method: 'POST' });
+    const result = await res.json();
     await loadDigest();
-    alert('执行完成，已发送推送。');
+    if (result.push_sent) {
+      alert('执行完成，已发送推送。');
+    } else {
+      alert(`执行完成，但推送失败: ${result.error || 'unknown error'}`);
+    }
   } catch (err) {
     alert(`执行失败: ${err}`);
   } finally {
@@ -50,6 +80,19 @@ async function runNow() {
   }
 }
 
+function connectOutlook() {
+  window.location.href = '/auth/login';
+}
+
+async function disconnectOutlook() {
+  await fetch('/auth/logout', { method: 'POST' });
+  await loadAuthStatus();
+  await loadDigest();
+}
+
 document.getElementById('refresh').addEventListener('click', loadDigest);
 document.getElementById('runNow').addEventListener('click', runNow);
+document.getElementById('connectOutlook').addEventListener('click', connectOutlook);
+document.getElementById('disconnectOutlook').addEventListener('click', disconnectOutlook);
+loadAuthStatus();
 loadDigest();

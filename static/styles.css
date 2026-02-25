@@ -47,6 +47,8 @@ button {
 }
 #refresh { background: #fff; color: #0f172a; }
 #runNow { background: var(--accent); color: #0f172a; }
+#connectOutlook { background: #22c55e; color: #052e16; }
+#disconnectOutlook { background: #ef4444; color: #fff; }
 
 .card {
   margin-top: 16px;

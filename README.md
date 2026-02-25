@@ -5,6 +5,7 @@
 - 从 Canvas 通知邮件中提取作业/截止时间（主来源）
 - Canvas API 为可选增强（可不配置）
 - 生成每日摘要并推送到 iPhone（Pushover）
+- Outlook 使用 Delegated OAuth 登录，无需申请 Application Mail.Read 管理员审批
 - 提供一个可交互图形页面查看详情和手动触发
 
 ## 1. 快速启动
@@ -33,17 +34,23 @@ uvicorn app.main:app --reload --port 8000
 - 如果 `CANVAS_TOKEN` 留空，系统会自动跳过 Canvas API，不会报错。
 - 此时任务主要来自 Outlook 里 Canvas 通知邮件解析。
 
-### Outlook (Microsoft Graph)
+### Outlook (Microsoft Graph, Delegated)
 1. 在 Azure Portal 注册应用
-2. 给应用添加 Microsoft Graph Application 权限：
+2. 给应用添加 Microsoft Graph Delegated 权限：
 - `Mail.Read`
-3. 管理员同意权限
+- `offline_access`
+- `User.Read`（可选）
+3. 在 `Authentication` 中添加重定向 URI：
+- `http://127.0.0.1:8000/auth/callback`
 4. 生成 client secret
 5. 填入:
 - `MS_TENANT_ID`
 - `MS_CLIENT_ID`
 - `MS_CLIENT_SECRET`
 - `MS_USER_EMAIL`
+- `MS_REDIRECT_URI`
+- `MS_TOKEN_STORE_PATH`
+6. 启动后，在首页点击 `连接 Outlook` 完成首次授权
 
 ### iPhone 推送 (Pushover)
 1. iPhone 安装 Pushover App
@@ -59,6 +66,8 @@ uvicorn app.main:app --reload --port 8000
 
 ## 4. Web 页面功能
 
+- `连接 Outlook`: 首次授权 Microsoft 账号
+- `断开 Outlook`: 删除本地 token，重新授权
 - `刷新摘要`: 读取并展示当天数据
 - `立即执行并推送`: 立即拉取 Outlook（和可选 Canvas）并发 iPhone 推送
 
@@ -71,5 +80,5 @@ uvicorn app.main:app --reload --port 8000
 
 ## 6. 注意
 
-- Outlook Application 权限读取邮箱涉及隐私和管理员许可，请只在个人受控环境使用。
+- 本地会保存 Microsoft refresh token 到 `data/ms_token.json`，请勿泄露该文件。
 - 本项目是 MVP，未包含完整鉴权、审计、重试和告警链路。

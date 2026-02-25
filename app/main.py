@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import secrets
+from typing import Optional
+
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -23,6 +26,8 @@ outlook_client = OutlookClient(
     settings.ms_client_id,
     settings.ms_client_secret,
     settings.ms_user_email,
+    settings.ms_redirect_uri,
+    settings.ms_token_store_path,
 )
 notifier = Notifier(settings.push_provider, settings.pushover_app_token, settings.pushover_user_key)
 digest_service = DigestService(
@@ -34,6 +39,7 @@ digest_service = DigestService(
 )
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None
+oauth_state: Optional[str] = None
 
 
 async def run_daily_job() -> dict:
@@ -61,6 +67,49 @@ async def shutdown_event() -> None:
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("index.html", {"request": request, "schedule_time": settings.schedule_time, "timezone": settings.timezone})
+
+
+@app.get("/api/auth-status")
+async def auth_status() -> dict:
+    return {
+        "configured": outlook_client.is_configured(),
+        "connected": outlook_client.is_connected(),
+    }
+
+
+@app.get("/auth/login")
+async def auth_login() -> RedirectResponse:
+    global oauth_state
+    if not outlook_client.is_configured():
+        return RedirectResponse(url="/?auth=not-configured")
+    oauth_state = secrets.token_urlsafe(24)
+    return RedirectResponse(url=outlook_client.get_authorize_url(oauth_state))
+
+
+@app.get("/auth/callback")
+async def auth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None) -> RedirectResponse:
+    global oauth_state
+    if error:
+        return RedirectResponse(url=f"/?auth=error&reason={error}")
+    if not code:
+        return RedirectResponse(url="/?auth=error&reason=missing_code")
+    if oauth_state and state != oauth_state:
+        return RedirectResponse(url="/?auth=error&reason=state_mismatch")
+    try:
+        await outlook_client.exchange_code(code)
+    except Exception:
+        return RedirectResponse(url="/?auth=error&reason=token_exchange_failed")
+    finally:
+        oauth_state = None
+    return RedirectResponse(url="/?auth=ok")
+
+
+@app.post("/auth/logout")
+async def auth_logout() -> dict:
+    global latest_digest
+    outlook_client.disconnect()
+    latest_digest = None
+    return {"ok": True}
 
 
 @app.get("/api/today")
