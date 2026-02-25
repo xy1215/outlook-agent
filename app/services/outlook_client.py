@@ -27,6 +27,9 @@ class OutlookClient:
             return resp.json()["access_token"]
 
     async def fetch_recent_messages(self, max_count: int = 20) -> list[MailItem]:
+        if not self.tenant_id or not self.client_id or not self.client_secret or not self.user_email:
+            return []
+
         token = await self._get_token()
         now = datetime.now(timezone.utc).isoformat()
         graph_url = (

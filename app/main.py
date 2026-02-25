@@ -36,11 +36,15 @@ scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None
 
 
-async def run_daily_job() -> None:
+async def run_daily_job() -> dict:
     global latest_digest
     digest = await digest_service.build()
     latest_digest = digest
-    await notifier.send("校园每日提醒", DigestService.to_push_text(digest))
+    try:
+        await notifier.send("校园每日提醒", DigestService.to_push_text(digest))
+        return {"push_sent": True}
+    except Exception as exc:
+        return {"push_sent": False, "error": str(exc)}
 
 
 @app.on_event("startup")
@@ -69,5 +73,5 @@ async def get_today() -> dict:
 
 @app.post("/api/run-now")
 async def run_now() -> dict:
-    await run_daily_job()
-    return {"ok": True, "message": "Manual run completed and push sent."}
+    result = await run_daily_job()
+    return {"ok": True, "message": "Manual run completed.", **result}

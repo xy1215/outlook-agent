@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Optional
 from pydantic import BaseModel
 
 
 class TaskItem(BaseModel):
     source: str
     title: str
-    due_at: datetime | None = None
-    course: str | None = None
-    url: str | None = None
+    due_at: Optional[datetime] = None
+    course: Optional[str] = None
+    url: Optional[str] = None
     priority: int = 1
 
 
@@ -18,7 +21,7 @@ class MailItem(BaseModel):
     received_at: datetime
     preview: str = ""
     is_important: bool = False
-    url: str | None = None
+    url: Optional[str] = None
 
 
 class DailyDigest(BaseModel):

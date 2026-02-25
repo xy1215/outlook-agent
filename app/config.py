@@ -8,10 +8,10 @@ class Settings(BaseSettings):
     canvas_base_url: str = Field(default="", alias="CANVAS_BASE_URL")
     canvas_token: str = Field(default="", alias="CANVAS_TOKEN")
 
-    ms_tenant_id: str = Field(alias="MS_TENANT_ID")
-    ms_client_id: str = Field(alias="MS_CLIENT_ID")
-    ms_client_secret: str = Field(alias="MS_CLIENT_SECRET")
-    ms_user_email: str = Field(alias="MS_USER_EMAIL")
+    ms_tenant_id: str = Field(default="", alias="MS_TENANT_ID")
+    ms_client_id: str = Field(default="", alias="MS_CLIENT_ID")
+    ms_client_secret: str = Field(default="", alias="MS_CLIENT_SECRET")
+    ms_user_email: str = Field(default="", alias="MS_USER_EMAIL")
 
     push_provider: str = Field(default="pushover", alias="PUSH_PROVIDER")
     pushover_app_token: str = Field(default="", alias="PUSHOVER_APP_TOKEN")

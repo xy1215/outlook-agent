@@ -175,7 +175,10 @@ class DigestService:
 
     async def build(self) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
-        mails = await self.outlook_client.fetch_recent_messages()
+        try:
+            mails = await self.outlook_client.fetch_recent_messages()
+        except Exception:
+            mails = []
         tasks_from_mail = [t for t in (self._task_from_mail(mail, now) for mail in mails) if t is not None]
 
         canvas_tasks: list[TaskItem] = []
