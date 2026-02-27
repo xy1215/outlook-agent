@@ -4,6 +4,16 @@ from datetime import datetime, timedelta
 import re
 from zoneinfo import ZoneInfo
 
+REL_DUE_RE = re.compile(r"\b(today|tomorrow)\b(?:\s+(?:at\s+)?)?(\d{1,2}:\d{2})?\s*(am|pm|AM|PM)?")
+ISO_DUE_RE = re.compile(r"(20\d{2}-\d{1,2}-\d{1,2})(?:\s+(\d{1,2}:\d{2}))?")
+US_DUE_RE = re.compile(r"(\d{1,2}/\d{1,2})(?:/(\d{2,4}))?(?:\s+(\d{1,2}:\d{2})\s*(AM|PM|am|pm)?)?")
+MONTH_DUE_RE = re.compile(
+    r"\b("
+    r"Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|"
+    r"Oct|October|Nov|November|Dec|December"
+    r")\s+(\d{1,2})(?:,\s*(20\d{2}))?(?:\s+(?:at\s+)?(\d{1,2}:\d{2})\s*(AM|PM|am|pm)?)?"
+)
+
 from app.models import DailyDigest, MailItem, TaskItem
 from app.services.canvas_client import CanvasClient
 from app.services.llm_client import LLMTaskExtractor
@@ -30,6 +40,7 @@ class DigestService:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
         self.timezone_name = timezone_name
+        self.local_tz = ZoneInfo(self.timezone_name)
         self.lookahead_days = lookahead_days
         self.keywords = [k.strip().lower() for k in important_keywords.split(",") if k.strip()]
         self.task_mode = (task_mode or "action_only").strip().lower()
@@ -44,7 +55,7 @@ class DigestService:
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
             return not self.task_require_due
-        due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
+        due_local = task.due_at.astimezone(self.local_tz)
         return due_local <= now + timedelta(days=self.lookahead_days)
 
     def _is_mail_important(self, mail: MailItem) -> bool:
@@ -92,10 +103,10 @@ class DigestService:
         return any(p in t for p in generic_phrases)
 
     def _parse_deadline_from_text(self, text: str, now: datetime) -> datetime | None:
-        local_tz = ZoneInfo(self.timezone_name)
+        local_tz = self.local_tz
         text_l = text.lower()
 
-        rel_match = re.search(r"\b(today|tomorrow)\b(?:\s+(?:at\s+)?)?(\d{1,2}:\d{2})?\s*(am|pm|AM|PM)?", text)
+        rel_match = REL_DUE_RE.search(text)
         if rel_match:
             day_word = rel_match.group(1).lower()
             time_part = rel_match.group(2)
@@ -116,7 +127,7 @@ class DigestService:
             return base.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
         # ISO-like: 2026-03-08 23:59 or 2026-03-08
-        iso_match = re.search(r"(20\d{2}-\d{1,2}-\d{1,2})(?:\s+(\d{1,2}:\d{2}))?", text)
+        iso_match = ISO_DUE_RE.search(text)
         if iso_match:
             date_part = iso_match.group(1)
             time_part = iso_match.group(2) or "23:59"
@@ -126,7 +137,7 @@ class DigestService:
                 pass
 
         # US-like: 3/8 11:59 PM, 03/08/2026, 3/8
-        us_match = re.search(r"(\d{1,2}/\d{1,2})(?:/(\d{2,4}))?(?:\s+(\d{1,2}:\d{2})\s*(AM|PM|am|pm)?)?", text)
+        us_match = US_DUE_RE.search(text)
         if us_match:
             mmdd = us_match.group(1)
             year_part = us_match.group(2)
@@ -155,13 +166,7 @@ class DigestService:
                 pass
 
         # Month words: Mar 8, March 8 11:59 PM
-        month_match = re.search(
-            r"\b("
-            r"Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|"
-            r"Oct|October|Nov|November|Dec|December"
-            r")\s+(\d{1,2})(?:,\s*(20\d{2}))?(?:\s+(?:at\s+)?(\d{1,2}:\d{2})\s*(AM|PM|am|pm)?)?",
-            text,
-        )
+        month_match = MONTH_DUE_RE.search(text)
         if month_match:
             month_word = month_match.group(1)
             day = int(month_match.group(2))
@@ -395,7 +400,7 @@ class DigestService:
         due_tasks = [t for t in tasks if self._is_due_soon(t, now)]
         important_mails = [m for m in mails if self._is_mail_important(m)]
 
-        due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=ZoneInfo(self.timezone_name)))
+        due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=self.local_tz))
         important_mails.sort(key=lambda x: x.received_at, reverse=True)
 
         summary = (
@@ -419,7 +424,7 @@ class DigestService:
         for task in digest.tasks:
             if task.due_at is None:
                 continue
-            due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
+            due_local = task.due_at.astimezone(self.local_tz)
             if due_floor <= due_local <= due_limit:
                 push_tasks.append(task)
 
