@@ -90,6 +90,12 @@ a { color: var(--primary); }
   font-family: "SFMono-Regular", Consolas, monospace;
 }
 
+.push-meta {
+  margin: 8px 0 0;
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
 @media (min-width: 760px) {
   .mail-columns {
     grid-template-columns: repeat(3, 1fr);

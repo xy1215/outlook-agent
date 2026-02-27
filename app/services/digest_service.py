@@ -487,26 +487,48 @@ class DigestService:
         tone = (self.push_tone or "学姐风").strip()
         is_cute = "可爱" in tone
 
-        if not push_tasks:
+        first, hours_left, urgency = self._push_context(push_tasks, now)
+        if first is None or hours_left is None:
             if is_cute:
                 return "可爱提醒: 今天节奏很稳，记得抽 15 分钟整理下本周任务喔。"
             return "学姐提醒: 今天没有紧急截止，建议现在把本周任务先排进日程。"
 
-        first = push_tasks[0]
-        due_local = first.due_at.astimezone(self.local_tz) if first.due_at else now
-        seconds_left = max((due_local - now).total_seconds(), 0)
-        hours_left = max(math.ceil(seconds_left / 3600), 0)
-
         if is_cute:
+            if urgency == "critical":
+                return f"可爱催促: {first.title} 只剩约 {hours_left} 小时啦，先交掉再奖励自己。"
+            if urgency == "high":
+                return f"可爱提醒: {first.title} 还剩约 {hours_left} 小时，今天优先把它拿下喔。"
             return (
                 f"可爱提醒: {first.title} 还剩大约 {hours_left} 小时截止啦，"
                 "现在动手最轻松，冲呀。"
             )
 
+        if urgency == "critical":
+            return f"学姐催办: {first.title} 距离截止约 {hours_left} 小时，先做完这一项。"
+        if urgency == "high":
+            return f"学姐提醒: {first.title} 还剩约 {hours_left} 小时，建议今天优先清掉。"
         return (
             f"学姐提醒: {first.title} 距离截止约 {hours_left} 小时，"
             "先把这件事做完，今天就稳了。"
         )
+
+    def _push_context(self, push_tasks: list[TaskItem], now: datetime) -> tuple[TaskItem | None, int | None, str]:
+        if not push_tasks:
+            return None, None, "none"
+        first = min(
+            push_tasks,
+            key=lambda t: t.due_at.astimezone(self.local_tz) if t.due_at else datetime.max.replace(tzinfo=self.local_tz),
+        )
+        due_local = first.due_at.astimezone(self.local_tz) if first.due_at else now
+        seconds_left = max((due_local - now).total_seconds(), 0)
+        hours_left = max(math.ceil(seconds_left / 3600), 0)
+        if hours_left <= 6:
+            return first, hours_left, "critical"
+        if hours_left <= 24:
+            return first, hours_left, "high"
+        if hours_left <= 48:
+            return first, hours_left, "medium"
+        return first, hours_left, "low"
 
     async def build(self) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
@@ -590,7 +612,23 @@ class DigestService:
             if due_floor <= due_local <= due_limit:
                 push_tasks.append(task)
 
-        lines = [digest.summary_text, self._personalized_push_line(push_tasks, now)]
+        tone = (self.push_tone or "学姐风").strip()
+        _, _, urgency = self._push_context(push_tasks, now)
+        digest.push_tone = tone
+        digest.push_urgency = urgency
+        urgency_labels = {
+            "none": "无紧急任务",
+            "low": "低",
+            "medium": "一般",
+            "high": "较紧急",
+            "critical": "紧急",
+        }
+
+        lines = [
+            digest.summary_text,
+            f"[推送] 风格 {tone} | 紧急度 {urgency_labels.get(urgency, '一般')}",
+            self._personalized_push_line(push_tasks, now),
+        ]
         for task in push_tasks[:5]:
             due = task.due_at.strftime("%m-%d %H:%M") if task.due_at else "无截止时间"
             lines.append(f"[任务] {task.title} | {due}")

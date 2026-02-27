@@ -39,3 +39,5 @@ class DailyDigest(BaseModel):
     mail_buckets: MailBuckets = Field(default_factory=MailBuckets)
     summary_text: str
     push_preview: str = ""
+    push_tone: str = ""
+    push_urgency: str = "none"

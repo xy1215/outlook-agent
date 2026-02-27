@@ -28,6 +28,16 @@ async function loadDigest() {
   const data = await res.json();
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
+  const urgencyMap = {
+    none: '无紧急任务',
+    low: '低',
+    medium: '一般',
+    high: '较紧急',
+    critical: '紧急',
+  };
+  const tone = data.push_tone || '学姐风';
+  const urgency = urgencyMap[data.push_urgency] || '一般';
+  document.getElementById('pushMeta').textContent = `推送风格: ${tone} | 截止紧急度: ${urgency}`;
   document.getElementById('pushPreview').textContent = data.push_preview || '暂无推送预览';
 
   const tasks = document.getElementById('tasks');

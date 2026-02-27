@@ -146,6 +146,8 @@ def test_push_text_only_includes_due_tasks_within_window():
     assert "Near due" in text
     assert "Far due" not in text
     assert "No due" not in text
+    assert "[推送] 风格 学姐风" in text
+    assert digest.push_urgency in {"high", "medium", "critical"}
 
 
 def test_requires_due_filters_mail_without_deadline():
@@ -228,4 +230,22 @@ def test_push_text_uses_cute_tone():
         summary_text="s",
     )
     text = service.to_push_text(digest)
-    assert "可爱提醒" in text
+    assert "可爱" in text
+    assert digest.push_tone == "可爱风"
+
+
+def test_push_text_uses_senior_style_urge_for_critical_deadline():
+    service = make_service(push_tone="学姐风")
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    digest = DailyDigest(
+        generated_at=now,
+        date_label="2026-02-25",
+        tasks=[
+            TaskItem(source="outlook_canvas_mail", title="Final Report", due_at=datetime(2026, 2, 25, 12, 0, tzinfo=timezone.utc)),
+        ],
+        important_mails=[],
+        summary_text="s",
+    )
+    text = service.to_push_text(digest)
+    assert "学姐催办" in text
+    assert digest.push_urgency == "critical"
