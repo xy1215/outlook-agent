@@ -439,6 +439,7 @@ class DigestService:
                 bucket = llm_result.get(idx)
             if bucket not in self.mail_buckets:
                 bucket = self._rule_based_bucket(mail, now, mail_tasks.get(idx, []))
+            mail.category = bucket
             triage[bucket].append(mail)
 
         for bucket in self.mail_buckets:

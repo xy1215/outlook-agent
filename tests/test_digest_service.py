@@ -231,3 +231,22 @@ def test_rule_based_mail_triage_three_buckets():
     assert b1 == "立刻处理"
     assert b2 == "本周待办"
     assert b3 == "信息参考"
+
+
+def test_triage_sets_mail_category_field():
+    import asyncio
+
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mail = MailItem(
+        subject="Canvas reminder for next week quiz",
+        sender="notifications@instructure.com",
+        received_at=now,
+        preview="Quiz due on 2026-03-01 23:59",
+        is_important=False,
+        url=None,
+    )
+
+    triage = asyncio.run(service._triage_mails([mail], now.astimezone(), {0: []}))
+    assert sum(len(v) for v in triage.values()) == 1
+    assert mail.category in ("立刻处理", "本周待办", "信息参考")
