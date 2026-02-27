@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
@@ -23,11 +24,15 @@ class MailClassifier:
         llm_api_base: str = "https://api.openai.com/v1",
         llm_api_key: str = "",
         llm_model: str = "",
+        llm_timeout_sec: int = 12,
+        llm_max_parallel: int = 6,
     ) -> None:
         self.timezone_name = timezone_name
         self.llm_api_base = llm_api_base.rstrip("/")
         self.llm_api_key = llm_api_key.strip()
         self.llm_model = llm_model.strip()
+        self.llm_timeout_sec = max(3, llm_timeout_sec)
+        self.llm_max_parallel = max(1, llm_max_parallel)
 
     def _fallback_bucket(self, mail: MailItem, due_at: datetime | None, now: datetime) -> str:
         text = f"{mail.subject} {mail.preview} {mail.body_text[:800]}".lower()
@@ -74,7 +79,7 @@ class MailClassifier:
         }
         headers = {"Authorization": f"Bearer {self.llm_api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=12) as client:
+            async with httpx.AsyncClient(timeout=self.llm_timeout_sec) as client:
                 resp = await client.post(f"{self.llm_api_base}/chat/completions", json=payload, headers=headers)
                 resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
@@ -90,13 +95,21 @@ class MailClassifier:
         immediate: list[MailItem] = []
         weekly: list[MailItem] = []
         reference: list[MailItem] = []
+        labels: dict[int, str] = {}
+        sem = asyncio.Semaphore(self.llm_max_parallel)
 
-        for idx, mail in enumerate(mails):
+        async def classify_one(idx: int, mail: MailItem) -> None:
             due_at = due_map.get(idx)
-            label = await self._llm_bucket(mail, due_at, now)
+            async with sem:
+                label = await self._llm_bucket(mail, due_at, now)
             if label is None:
                 label = self._fallback_bucket(mail, due_at, now)
+            labels[idx] = label
 
+        await asyncio.gather(*(classify_one(idx, mail) for idx, mail in enumerate(mails)))
+
+        for idx, mail in enumerate(mails):
+            label = labels.get(idx, "reference")
             if label == "immediate":
                 mail.category = "立刻处理"
                 immediate.append(mail)

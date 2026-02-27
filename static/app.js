@@ -27,8 +27,10 @@ async function loadDigest() {
   const res = await fetch('/api/today');
   const data = await res.json();
   const nowTs = data.generated_at ? new Date(data.generated_at).getTime() : Date.now();
+  const updatedText = data.generated_at ? new Date(data.generated_at).toLocaleString() : '未知';
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
+  document.getElementById('generatedAt').textContent = `数据更新时间：${updatedText}`;
   document.getElementById('triageSummary').textContent =
     `邮件分类统计：立刻处理 ${ (data.mails_immediate || []).length } 封，` +
     `本周待办 ${ (data.mails_weekly || []).length } 封，` +
