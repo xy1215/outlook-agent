@@ -45,8 +45,11 @@ class DigestService:
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
             return not self.task_require_due
-        due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
-        return due_local <= now + timedelta(days=self.lookahead_days)
+        local_tz = ZoneInfo(self.timezone_name)
+        now_local = now.astimezone(local_tz)
+        due_local = task.due_at.astimezone(local_tz)
+        today_floor = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        return today_floor <= due_local <= now_local + timedelta(days=self.lookahead_days)
 
     def _is_mail_important(self, mail: MailItem) -> bool:
         if mail.is_important:

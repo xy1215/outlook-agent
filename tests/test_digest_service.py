@@ -142,6 +142,24 @@ def test_push_text_only_includes_due_tasks_within_window():
     assert "No due" not in text
 
 
+def test_is_due_soon_excludes_tasks_before_today_floor():
+    service = make_service()
+    # 2026-02-27 18:00 PST
+    now = datetime(2026, 2, 28, 2, 0, tzinfo=timezone.utc)
+    yesterday_due = TaskItem(
+        source="canvas_feed",
+        title="Old task",
+        due_at=datetime(2026, 2, 27, 7, 59, tzinfo=timezone.utc),
+    )
+    today_due = TaskItem(
+        source="canvas_feed",
+        title="Today task",
+        due_at=datetime(2026, 2, 27, 10, 0, tzinfo=timezone.utc),
+    )
+    assert not service._is_due_soon(yesterday_due, now)
+    assert service._is_due_soon(today_due, now)
+
+
 def test_requires_due_filters_mail_without_deadline():
     service = make_service()
     now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
