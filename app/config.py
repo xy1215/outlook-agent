@@ -35,11 +35,10 @@ class Settings(BaseSettings):
     )
     task_require_due: bool = Field(default=True, alias="TASK_REQUIRE_DUE")
     push_due_within_hours: int = Field(default=48, alias="PUSH_DUE_WITHIN_HOURS")
-    push_nudge_style: str = Field(default="学姐风", alias="PUSH_NUDGE_STYLE")
-
-    llm_base_url: str = Field(default="https://api.openai.com/v1", alias="LLM_BASE_URL")
+    push_persona: str = Field(default="auto", alias="PUSH_PERSONA")
+    llm_api_base: str = Field(default="https://api.openai.com/v1", alias="LLM_API_BASE")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
-    llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
+    llm_model: str = Field(default="", alias="LLM_MODEL")
 
 
 settings = Settings()

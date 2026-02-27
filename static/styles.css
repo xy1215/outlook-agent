@@ -65,20 +65,17 @@ button {
 }
 
 h2, h3 { margin-top: 0; }
-#pushStyle {
-  margin-top: 10px;
-  margin-bottom: 8px;
-  font-weight: 600;
-  color: #334155;
-}
-#pushMessage {
-  margin-top: 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: #eff6ff;
-  color: #1e3a8a;
-  border: 1px dashed #93c5fd;
-}
 ul { margin: 0; padding-left: 18px; }
 li { margin-bottom: 8px; color: var(--muted); }
 a { color: var(--primary); }
+
+.push-preview {
+  margin: 0;
+  white-space: pre-wrap;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #1e293b;
+  line-height: 1.45;
+}

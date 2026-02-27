@@ -13,6 +13,7 @@ from app.models import DailyDigest
 from app.scheduler import create_scheduler, daily_trigger
 from app.services.canvas_client import CanvasClient
 from app.services.digest_service import DigestService
+from app.services.mail_classifier import MailClassifier
 from app.services.notifier import Notifier
 from app.services.outlook_client import OutlookClient
 
@@ -30,6 +31,12 @@ outlook_client = OutlookClient(
     settings.ms_token_store_path,
 )
 notifier = Notifier(settings.push_provider, settings.pushover_app_token, settings.pushover_user_key)
+mail_classifier = MailClassifier(
+    timezone_name=settings.timezone,
+    llm_api_base=settings.llm_api_base,
+    llm_api_key=settings.llm_api_key,
+    llm_model=settings.llm_model,
+)
 digest_service = DigestService(
     canvas_client,
     outlook_client,
@@ -41,10 +48,8 @@ digest_service = DigestService(
     settings.task_noise_keywords,
     settings.task_require_due,
     settings.push_due_within_hours,
-    settings.push_nudge_style,
-    settings.llm_base_url,
-    settings.llm_api_key,
-    settings.llm_model,
+    settings.push_persona,
+    mail_classifier,
 )
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None

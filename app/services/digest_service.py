@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-import json
 import re
 from zoneinfo import ZoneInfo
 
-import httpx
-
 from app.models import DailyDigest, MailItem, TaskItem
 from app.services.canvas_client import CanvasClient
+from app.services.mail_classifier import MailClassifier
 from app.services.outlook_client import OutlookClient
 
 
@@ -25,10 +23,8 @@ class DigestService:
         task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,piazza,announcement posted",
         task_require_due: bool = True,
         push_due_within_hours: int = 48,
-        push_nudge_style: str = "学姐风",
-        llm_base_url: str = "https://api.openai.com/v1",
-        llm_api_key: str = "",
-        llm_model: str = "gpt-4o-mini",
+        push_persona: str = "auto",
+        mail_classifier: MailClassifier | None = None,
     ) -> None:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
@@ -40,14 +36,8 @@ class DigestService:
         self.noise_keywords = [k.strip().lower() for k in task_noise_keywords.split(",") if k.strip()]
         self.task_require_due = task_require_due
         self.push_due_within_hours = push_due_within_hours
-        self.push_nudge_style = (push_nudge_style or "学姐风").strip()
-
-        self.llm_base_url = (llm_base_url or "https://api.openai.com/v1").rstrip("/")
-        self.llm_api_key = llm_api_key.strip()
-        self.llm_model = llm_model.strip()
-
-        self.mail_buckets = ("立刻处理", "本周待办", "信息参考")
-        self.nudge_styles = ("学姐风", "可爱风")
+        self.push_persona = (push_persona or "auto").strip().lower()
+        self.mail_classifier = mail_classifier
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -268,6 +258,10 @@ class DigestService:
         tasks = self._tasks_from_mail(mail, now)
         return tasks[0] if tasks else None
 
+    def _mail_due_from_content(self, mail: MailItem, now: datetime) -> datetime | None:
+        combined = f"{mail.subject} {mail.preview} {mail.body_text[:1600]}"
+        return self._parse_deadline_from_text(combined, now)
+
     def _tasks_from_mail(self, mail: MailItem, now: datetime) -> list[TaskItem]:
         if not self._looks_like_canvas_mail(mail):
             return []
@@ -330,198 +324,13 @@ class DigestService:
             merged.append(task)
         return merged
 
-    async def _triage_with_llm(self, mails: list[MailItem]) -> dict[int, str] | None:
-        if not self.llm_api_key or not self.llm_model or not mails:
-            return None
-
-        entries = []
-        for idx, mail in enumerate(mails[:25]):
-            entries.append(
-                {
-                    "index": idx,
-                    "subject": mail.subject,
-                    "sender": mail.sender,
-                    "preview": mail.preview[:200],
-                    "received_at": mail.received_at.isoformat(),
-                    "important": mail.is_important,
-                }
-            )
-
-        system_prompt = (
-            "你是邮件分诊助手。请把每封邮件归类到这三类之一："
-            "立刻处理、本周待办、信息参考。"
-            "仅输出 JSON，格式为 {\"items\":[{\"index\":0,\"bucket\":\"立刻处理\"}]}."
-        )
-        user_prompt = json.dumps(entries, ensure_ascii=False)
-
-        payload = {
-            "model": self.llm_model,
-            "temperature": 0,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        }
-
-        headers = {"Authorization": f"Bearer {self.llm_api_key}", "Content-Type": "application/json"}
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.post(f"{self.llm_base_url}/chat/completions", headers=headers, json=payload)
-                resp.raise_for_status()
-                content = (((resp.json().get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
-        except Exception:
-            return None
-
-        if not content:
-            return None
-
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError:
-            match = re.search(r"\{[\s\S]*\}", content)
-            if not match:
-                return None
-            try:
-                parsed = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                return None
-
-        items = parsed.get("items") if isinstance(parsed, dict) else None
-        if not isinstance(items, list):
-            return None
-
-        output: dict[int, str] = {}
-        for row in items:
-            if not isinstance(row, dict):
-                continue
-            idx = row.get("index")
-            bucket = row.get("bucket")
-            if not isinstance(idx, int) or not isinstance(bucket, str):
-                continue
-            if bucket not in self.mail_buckets:
-                continue
-            if 0 <= idx < len(mails):
-                output[idx] = bucket
-        return output or None
-
-    def _rule_based_bucket(self, mail: MailItem, now: datetime, tasks_for_mail: list[TaskItem]) -> str:
-        urgent_limit = now + timedelta(hours=self.push_due_within_hours)
-        for task in tasks_for_mail:
-            if task.due_at is None:
-                continue
-            due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
-            if due_local <= urgent_limit:
-                return "立刻处理"
-
-        if self._is_mail_important(mail):
-            return "立刻处理"
-
-        if tasks_for_mail:
-            return "本周待办"
-
-        text = f"{mail.subject} {mail.preview} {mail.body_text[:800]}".lower()
-        if any(k in text for k in self.action_keywords):
-            return "本周待办"
-
-        return "信息参考"
-
-    async def _triage_mails(
-        self,
-        mails: list[MailItem],
-        now: datetime,
-        mail_tasks: dict[int, list[TaskItem]],
-    ) -> dict[str, list[MailItem]]:
-        triage = {bucket: [] for bucket in self.mail_buckets}
-        llm_result = await self._triage_with_llm(mails)
-
-        for idx, mail in enumerate(mails):
-            bucket = None
-            if llm_result is not None:
-                bucket = llm_result.get(idx)
-            if bucket not in self.mail_buckets:
-                bucket = self._rule_based_bucket(mail, now, mail_tasks.get(idx, []))
-            mail.category = bucket
-            triage[bucket].append(mail)
-
-        for bucket in self.mail_buckets:
-            triage[bucket].sort(key=lambda m: m.received_at, reverse=True)
-        return triage
-
-    def _pick_nudge_style(self, due_tasks: list[TaskItem], now: datetime) -> str:
-        configured = self.push_nudge_style.strip()
-        if configured in self.nudge_styles:
-            return configured
-        if configured and configured not in {"auto", "学姐风/可爱风", "可爱风/学姐风"}:
-            return "学姐风"
-
-        earliest_due: datetime | None = None
-        for task in due_tasks:
-            if task.due_at is None:
-                continue
-            due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
-            if earliest_due is None or due_local < earliest_due:
-                earliest_due = due_local
-
-        if earliest_due is None:
-            return "学姐风"
-
-        hours_left = int((earliest_due - now).total_seconds() // 3600)
-        if hours_left <= 12:
-            return "学姐风"
-        return "可爱风"
-
-    def _build_due_nudge(self, due_tasks: list[TaskItem], now: datetime) -> tuple[str, str]:
-        due_limit = now + timedelta(hours=self.push_due_within_hours)
-        candidates: list[tuple[datetime, TaskItem]] = []
-        overdue: list[tuple[datetime, TaskItem]] = []
-
-        for task in due_tasks:
-            if task.due_at is None:
-                continue
-            due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
-            if due_local < now:
-                overdue.append((due_local, task))
-            elif due_local <= due_limit:
-                candidates.append((due_local, task))
-
-        style = self._pick_nudge_style(due_tasks, now)
-        if overdue:
-            due_local, task = sorted(overdue, key=lambda x: x[0])[0]
-            due_text = due_local.strftime("%m-%d %H:%M")
-            if "可爱" in style:
-                return style, f"小提醒！{task.title} 在 {due_text} 就到点了（甚至超时啦），现在冲还能补救~"
-            return style, f"学姐催一下：{task.title} 在 {due_text} 已到期，先交可完成部分，马上补齐。"
-
-        if not candidates:
-            return style, ""
-
-        due_local, task = sorted(candidates, key=lambda x: x[0])[0]
-        due_text = due_local.strftime("%m-%d %H:%M")
-        hours_left = max(int((due_local - now).total_seconds() // 3600), 0)
-
-        if "可爱" in style:
-            if hours_left <= 8:
-                return style, f"叮咚！{task.title} 还剩约 {hours_left} 小时（{due_text} 截止），现在开始刚刚好。"
-            return style, f"今天的重点任务是 {task.title}，{due_text} 前提交就稳啦，冲呀~"
-
-        if hours_left <= 8:
-            return style, f"学姐提醒：{task.title} 距离截止只剩约 {hours_left} 小时（{due_text}），先把最关键部分提交。"
-        return style, f"学姐建议：优先完成 {task.title}，截止时间 {due_text}，你按节奏推进就能稳住。"
-
     async def build(self) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
         try:
             mails = await self.outlook_client.fetch_recent_messages()
         except Exception:
             mails = []
-
-        mail_tasks: dict[int, list[TaskItem]] = {}
-        tasks_from_mail: list[TaskItem] = []
-        for idx, mail in enumerate(mails):
-            extracted = self._tasks_from_mail(mail, now)
-            if extracted:
-                mail_tasks[idx] = extracted
-                tasks_from_mail.extend(extracted)
+        tasks_from_mail = [task for mail in mails for task in self._tasks_from_mail(mail, now)]
 
         canvas_tasks: list[TaskItem] = []
         try:
@@ -531,32 +340,66 @@ class DigestService:
             canvas_tasks = []
 
         tasks = self._merge_tasks(tasks_from_mail, canvas_tasks)
-        due_tasks = [t for t in tasks if self._is_due_soon(t, now)]
-        due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=ZoneInfo(self.timezone_name)))
 
-        triage = await self._triage_mails(mails, now, mail_tasks)
-        important_mails = triage["立刻处理"][:]
-        if not important_mails:
-            important_mails = [m for m in mails if self._is_mail_important(m)]
-            important_mails.sort(key=lambda x: x.received_at, reverse=True)
+        due_tasks = [t for t in tasks if self._is_due_soon(t, now)]
+        important_mails = [m for m in mails if self._is_mail_important(m)]
+        due_map = {idx: self._mail_due_from_content(mail, now) for idx, mail in enumerate(mails)}
+        if self.mail_classifier is None:
+            mails_immediate: list[MailItem] = []
+            mails_weekly: list[MailItem] = []
+            mails_reference: list[MailItem] = mails
+        else:
+            buckets = await self.mail_classifier.classify(mails, due_map, now)
+            mails_immediate = buckets.immediate
+            mails_weekly = buckets.weekly
+            mails_reference = buckets.reference
+
+        due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=ZoneInfo(self.timezone_name)))
+        important_mails.sort(key=lambda x: x.received_at, reverse=True)
+        mails_immediate.sort(key=lambda x: x.received_at, reverse=True)
+        mails_weekly.sort(key=lambda x: x.received_at, reverse=True)
+        mails_reference.sort(key=lambda x: x.received_at, reverse=True)
 
         summary = (
-            f"今天有 {len(due_tasks)} 个待办；"
-            f"邮件分诊：立刻处理 {len(triage['立刻处理'])}，"
-            f"本周待办 {len(triage['本周待办'])}，信息参考 {len(triage['信息参考'])}。"
+            f"今天有 {len(due_tasks)} 个待办（邮件解析+Canvas可选），"
+            f"{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
         )
 
-        due_push_style, due_push_message = self._build_due_nudge(due_tasks, now)
-
-        return DailyDigest(
+        digest = DailyDigest(
             generated_at=now,
             date_label=now.strftime("%Y-%m-%d"),
             tasks=due_tasks,
             important_mails=important_mails,
             summary_text=summary,
-            mail_triage=triage,
-            due_push_style=due_push_style,
-            due_push_message=due_push_message,
+            mails_immediate=mails_immediate,
+            mails_weekly=mails_weekly,
+            mails_reference=mails_reference,
+        )
+        digest.push_preview = self.to_push_text(digest)
+        return digest
+
+    def _build_persona_nudge(self, push_tasks: list[TaskItem], now: datetime) -> str:
+        if not push_tasks:
+            return "今天没有 48 小时内到期任务，节奏很稳，继续保持。"
+        top = push_tasks[0]
+        if top.due_at is None:
+            return ""
+        due_local = top.due_at.astimezone(ZoneInfo(self.timezone_name))
+        hours_left = max(0, int((due_local - now).total_seconds() // 3600))
+        title = top.title
+
+        persona = self.push_persona
+        if persona == "auto":
+            persona = "senior" if hours_left <= 18 else "cute"
+
+        if persona == "cute":
+            return (
+                f"小提醒来啦：{title} 还剩约 {hours_left} 小时，"
+                "先把最难的一小段做完就已经赢一半啦，冲冲冲。"
+            )
+        return (
+            f"学姐催一下：{title} 距离截止约 {hours_left} 小时。"
+            "现在就开工 25 分钟，先交可提交版本，别把主动权让给ddl。"
         )
 
     def to_push_text(self, digest: DailyDigest) -> str:
@@ -571,15 +414,14 @@ class DigestService:
             if due_floor <= due_local <= due_limit:
                 push_tasks.append(task)
 
-        lines = [digest.summary_text]
-        if digest.due_push_message:
-            if digest.due_push_style:
-                lines.append(f"[催办风格] {digest.due_push_style}")
-            lines.append(digest.due_push_message)
-
+        lines = [digest.summary_text, self._build_persona_nudge(push_tasks, now)]
         for task in push_tasks[:5]:
             due = task.due_at.strftime("%m-%d %H:%M") if task.due_at else "无截止时间"
             lines.append(f"[任务] {task.title} | {due}")
-        for mail in digest.important_mails[:3]:
+        for mail in digest.mails_immediate[:3]:
+            lines.append(f"[立刻处理] {mail.subject} | {mail.sender}")
+        for mail in digest.mails_weekly[:2]:
+            lines.append(f"[本周待办] {mail.subject} | {mail.sender}")
+        for mail in digest.important_mails[:2]:
             lines.append(f"[邮件] {mail.subject} | {mail.sender}")
         return "\n".join(lines)

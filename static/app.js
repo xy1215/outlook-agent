@@ -23,30 +23,12 @@ async function loadAuthStatus() {
   }
 }
 
-function renderMails(listElementId, mails, emptyText) {
-  const mailList = document.getElementById(listElementId);
-  mailList.innerHTML = '';
-  if (!mails || !mails.length) {
-    const li = document.createElement('li');
-    li.textContent = emptyText;
-    mailList.appendChild(li);
-    return;
-  }
-
-  mails.forEach((mail) => {
-    const li = document.createElement('li');
-    li.innerHTML = `${mail.subject} - ${mail.sender} ${mail.url ? `<a href="${mail.url}" target="_blank">打开</a>` : ''}`;
-    mailList.appendChild(li);
-  });
-}
-
 async function loadDigest() {
   const res = await fetch('/api/today');
   const data = await res.json();
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
-  document.getElementById('pushStyle').textContent = `催办风格: ${data.due_push_style || '学姐风'}`;
-  document.getElementById('pushMessage').textContent = data.due_push_message || '暂无 48 小时内到期催办文案';
+  document.getElementById('pushPreview').textContent = data.push_preview || '暂无推送预览';
 
   const tasks = document.getElementById('tasks');
   tasks.innerHTML = '';
@@ -63,10 +45,36 @@ async function loadDigest() {
     });
   }
 
-  const triage = data.mail_triage || {};
-  renderMails('mailsNow', triage['立刻处理'] || [], '暂无需要立刻处理邮件');
-  renderMails('mailsWeek', triage['本周待办'] || [], '暂无本周待办邮件');
-  renderMails('mailsRef', triage['信息参考'] || [], '暂无信息参考邮件');
+  const renderMailList = (id, items, emptyText) => {
+    const root = document.getElementById(id);
+    root.innerHTML = '';
+    if (!items.length) {
+      const li = document.createElement('li');
+      li.textContent = emptyText;
+      root.appendChild(li);
+      return;
+    }
+    items.forEach((mail) => {
+      const li = document.createElement('li');
+      li.innerHTML = `${mail.subject} - ${mail.sender} ${mail.url ? `<a href="${mail.url}" target="_blank">打开</a>` : ''}`;
+      root.appendChild(li);
+    });
+  };
+
+  renderMailList('mailsImmediate', data.mails_immediate || [], '当前没有需要立刻处理的邮件');
+  renderMailList('mailsWeekly', data.mails_weekly || [], '当前没有本周待办邮件');
+  renderMailList('mailsReference', data.mails_reference || [], '当前没有信息参考邮件');
+
+  if (
+    !(data.mails_immediate || []).length &&
+    !(data.mails_weekly || []).length &&
+    !(data.mails_reference || []).length &&
+    (data.important_mails || []).length
+  ) {
+    // Backward-compatible fallback for older payloads.
+    renderMailList('mailsReference', data.important_mails || [], '当前没有信息参考邮件');
+  }
+
 }
 
 async function runNow() {
