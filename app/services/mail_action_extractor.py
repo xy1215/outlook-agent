@@ -28,6 +28,8 @@ class MailActionExtractor:
         llm_max_parallel: int = 6,
         trusted_sender_domains: str = ".edu,instructure.com,canvaslms.com",
         blocked_sender_keywords: str = "apartment,lease,housing,realtor,zillow,marketing,promo,discount,coupon,ad",
+        sender_allowlist: str = "",
+        sender_blocklist: str = "",
     ) -> None:
         self.timezone_name = timezone_name
         self.llm_api_base = llm_api_base.rstrip("/")
@@ -37,6 +39,8 @@ class MailActionExtractor:
         self.llm_max_parallel = max(1, llm_max_parallel)
         self.trusted_sender_domains = [x.strip().lower() for x in trusted_sender_domains.split(",") if x.strip()]
         self.blocked_sender_keywords = [x.strip().lower() for x in blocked_sender_keywords.split(",") if x.strip()]
+        self.sender_allowlist = {x.strip().lower() for x in sender_allowlist.split(",") if x.strip()}
+        self.sender_blocklist = {x.strip().lower() for x in sender_blocklist.split(",") if x.strip()}
 
     @staticmethod
     def _extract_sender_email(sender: str) -> str:
@@ -55,9 +59,11 @@ class MailActionExtractor:
         sender_l = (sender or "").strip().lower()
         if not sender_l:
             return False
-        if any(keyword in sender_l for keyword in self.blocked_sender_keywords):
-            return False
         email = self._extract_sender_email(sender_l)
+        if email in self.sender_blocklist:
+            return False
+        if email in self.sender_allowlist:
+            return True
         domain = email.split("@", 1)[1] if "@" in email else ""
         for marker in self.trusted_sender_domains:
             if marker.startswith("."):
@@ -65,6 +71,10 @@ class MailActionExtractor:
                     return True
             elif domain == marker or domain.endswith(f".{marker}"):
                 return True
+        normalized = re.sub(r"[^a-z0-9]+", " ", sender_l)
+        for keyword in self.blocked_sender_keywords:
+            if re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", normalized):
+                return False
         return False
 
     @staticmethod

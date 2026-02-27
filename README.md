@@ -71,7 +71,9 @@ uvicorn app.main:app --reload --port 8000
 - `PUSH_PERSONA=auto` 到期任务推送风格（`auto/senior/cute`）
 - `LLM_API_KEY` + `LLM_MODEL` 启用邮件三分类与全文行动任务抽取（未配置时不从邮件生成待办任务）
 - `LLM_TRUSTED_SENDER_DOMAINS` 控制允许进入 LLM 行动抽取的发件人域名（默认 `.edu,instructure.com,canvaslms.com`）
-- `LLM_BLOCKED_SENDER_KEYWORDS` 优先拦截发件人中的广告/租房关键词（默认包含 `apartment,lease,housing...`）
+- `LLM_BLOCKED_SENDER_KEYWORDS` 对非可信域名邮件做词边界拦截（默认包含 `apartment,lease,housing...`）
+- `LLM_SENDER_ALLOWLIST` 精确地址白名单（优先级高于域名/关键词）
+- `LLM_SENDER_BLOCKLIST` 精确地址黑名单（最高优先级，可强制拦截）
 
 ## 4. Web 页面功能
 

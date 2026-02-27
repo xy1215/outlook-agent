@@ -46,6 +46,8 @@ class Settings(BaseSettings):
         default="apartment,lease,housing,realtor,zillow,marketing,promo,discount,coupon,ad",
         alias="LLM_BLOCKED_SENDER_KEYWORDS",
     )
+    llm_sender_allowlist: str = Field(default="", alias="LLM_SENDER_ALLOWLIST")
+    llm_sender_blocklist: str = Field(default="", alias="LLM_SENDER_BLOCKLIST")
 
 
 settings = Settings()
