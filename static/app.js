@@ -36,6 +36,10 @@ async function loadDigest() {
     `本周待办 ${ (data.mails_weekly || []).length } 封，` +
     `信息参考 ${ (data.mails_reference || []).length } 封`;
   document.getElementById('pushStyle').textContent = `催办风格：${data.due_push_style || '未设置'}`;
+  document.getElementById('pushPersonaHint').textContent =
+    data.due_push_style
+      ? `当前采用 ${data.due_push_style}，以下为本次推送实际发送内容。`
+      : '当前没有可用催办风格，以下为默认推送内容。';
   document.getElementById('nextDueHint').textContent = data.next_due_hint || '最近截止提示：暂无';
   document.getElementById('pushPreview').textContent = data.push_preview || '暂无推送预览';
   document.getElementById('pushPreviewSenior').textContent = data.push_preview_senior || '暂无学姐风预览';
