@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
+import json
 import re
 from zoneinfo import ZoneInfo
+import httpx
 
 from app.models import DailyDigest, MailItem, TaskItem
-from app.services.mail_action_extractor import MailActionExtractor
 from app.services.canvas_client import CanvasClient
 from app.services.mail_classifier import MailClassifier
 from app.services.outlook_client import OutlookClient
@@ -26,7 +28,11 @@ class DigestService:
         push_due_within_hours: int = 48,
         push_persona: str = "auto",
         mail_classifier: MailClassifier | None = None,
-        mail_action_extractor: MailActionExtractor | None = None,
+        llm_api_base: str = "https://api.openai.com/v1",
+        llm_api_key: str = "",
+        llm_model: str = "",
+        llm_timeout_sec: int = 12,
+        llm_max_parallel: int = 6,
     ) -> None:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
@@ -40,7 +46,11 @@ class DigestService:
         self.push_due_within_hours = push_due_within_hours
         self.push_persona = (push_persona or "auto").strip().lower()
         self.mail_classifier = mail_classifier
-        self.mail_action_extractor = mail_action_extractor
+        self.llm_api_base = llm_api_base.rstrip("/")
+        self.llm_api_key = (llm_api_key or "").strip()
+        self.llm_model = (llm_model or "").strip()
+        self.llm_timeout_sec = max(3, llm_timeout_sec)
+        self.llm_max_parallel = max(1, llm_max_parallel)
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -344,27 +354,122 @@ class DigestService:
         task.published_at = now
         return task
 
+    @staticmethod
+    def _fallback_is_actionable_canvas_task(task: TaskItem) -> bool:
+        text = f"{task.title} {task.course or ''} {task.details or ''}".lower()
+        action_keywords = [
+            "assignment",
+            "homework",
+            "hw",
+            "quiz",
+            "exam",
+            "midterm",
+            "final",
+            "project",
+            "lab",
+            "report",
+            "submit",
+            "submission",
+            "participation",
+            "discussion",
+        ]
+        ignore_keywords = [
+            "office hour",
+            "office hours",
+            "announcement",
+            "no in-person",
+            "lecture",
+            "recording",
+            "student help",
+            "notification",
+            "orientation session",
+        ]
+        if any(k in text for k in ignore_keywords):
+            return False
+        return any(k in text for k in action_keywords)
+
+    async def _llm_is_actionable_canvas_task(self, task: TaskItem, now: datetime) -> bool | None:
+        if not self.llm_api_key or not self.llm_model:
+            return None
+        payload = {
+            "model": self.llm_model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Classify Canvas calendar events into actionable assignment tasks or non-actionable notifications.\n"
+                        "Keep only tasks that require student work submission/completion.\n"
+                        "Filter out office hours, lectures, announcements, reminder-only events.\n"
+                        "Return strict JSON: {\"label\":\"actionable|notification\"}."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "now": now.isoformat(),
+                            "title": task.title,
+                            "course": task.course,
+                            "details": task.details,
+                            "due_at": task.due_at.isoformat() if task.due_at else None,
+                        },
+                        ensure_ascii=True,
+                    ),
+                },
+            ],
+        }
+        headers = {"Authorization": f"Bearer {self.llm_api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=self.llm_timeout_sec) as client:
+                resp = await client.post(f"{self.llm_api_base}/chat/completions", json=payload, headers=headers)
+                resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+            label = str(json.loads(content).get("label", "")).strip().lower()
+            if label == "actionable":
+                return True
+            if label == "notification":
+                return False
+        except Exception:
+            return None
+        return None
+
+    async def _filter_canvas_tasks(self, tasks: list[TaskItem], now: datetime) -> list[TaskItem]:
+        if not tasks:
+            return []
+        keep: list[TaskItem] = []
+        sem = asyncio.Semaphore(self.llm_max_parallel)
+        lock = asyncio.Lock()
+
+        async def classify_one(task: TaskItem) -> None:
+            async with sem:
+                llm_result = await self._llm_is_actionable_canvas_task(task, now)
+            should_keep = self._fallback_is_actionable_canvas_task(task) if llm_result is None else llm_result
+            if not should_keep:
+                return
+            async with lock:
+                keep.append(task)
+
+        await asyncio.gather(*(classify_one(task) for task in tasks))
+        return keep
+
     async def build(self) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
         try:
             mails = await self.outlook_client.fetch_recent_messages()
         except Exception:
             mails = []
-        tasks_from_mail: list[TaskItem] = []
         due_map: dict[int, datetime | None] = {idx: None for idx, _ in enumerate(mails)}
-        if self.mail_action_extractor is not None:
-            scan = await self.mail_action_extractor.extract(mails, now)
-            tasks_from_mail = scan.tasks
-            due_map = scan.due_map
 
         canvas_tasks: list[TaskItem] = []
         try:
             canvas_tasks = await self.canvas_client.fetch_todo()
         except Exception:
-            # Canvas is optional; mail-derived tasks are the primary source.
+            # Canvas feed is optional.
             canvas_tasks = []
 
-        tasks = self._merge_tasks(tasks_from_mail, canvas_tasks)
+        tasks = await self._filter_canvas_tasks(canvas_tasks, now)
 
         due_tasks = [self._normalize_task_timeline(t, now) for t in tasks if self._is_due_soon(t, now)]
         important_mails = [m for m in mails if self._is_mail_important(m)]
@@ -384,7 +489,7 @@ class DigestService:
         mails_weekly.sort(key=lambda x: x.received_at, reverse=True)
         mails_reference.sort(key=lambda x: x.received_at, reverse=True)
 
-        summary = f"今天有 {len(due_tasks)} 个行动任务（Submit/Register/Verify），{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
+        summary = f"今天有 {len(due_tasks)} 个 Canvas 待办任务，{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
 
         resolved_style = self._resolve_push_style(due_tasks, now)
         push_tasks = self._collect_push_tasks(due_tasks, now)

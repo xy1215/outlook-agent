@@ -3,8 +3,8 @@
 一个个人智能 agent 原型：
 - 每天固定时间抓取 Outlook 学校邮箱并识别重要信息
 - 使用 LLM 将邮件分为：立刻处理 / 本周待办 / 信息参考
-- 使用 LLM 全文扫描邮件，仅提取需要 Submit/Register/Verify 的行动任务
-- Canvas API 为可选增强（可不配置）
+- 待办任务仅来自 Canvas Calendar feed（`.ics`）
+- 使用 LLM 对 Canvas 日历事件进行筛选，只保留需要完成的作业/任务
 - 生成每日摘要并推送到 iPhone（Pushover）
 - Outlook 使用 Delegated OAuth 登录，无需申请 Application Mail.Read 管理员审批
 - 提供一个可交互图形页面查看详情和手动触发
@@ -25,16 +25,16 @@ uvicorn app.main:app --reload --port 8000
 ## 2. 你需要准备的账号/API
 
 ### Canvas
-1. 登录 Canvas -> `Account -> Settings`
-2. 在 `Approved Integrations` 生成 Access Token
+1. 登录 Canvas -> `Calendar` -> `Calendar Feed`
+2. 复制你的 `.ics` 订阅链接
 3. 填入:
-- `CANVAS_BASE_URL` (例如 `https://xxx.instructure.com`)
-- `CANVAS_TOKEN`
-- `CANVAS_CALENDAR_FEED_URL`（可选，Canvas Calendar feed 的 `.ics` 链接）
+- `CANVAS_CALENDAR_FEED_URL`
+- `CANVAS_FEED_CACHE_PATH`（默认 `data/canvas_feed_cache.json`）
+- `CANVAS_FEED_REFRESH_HOURS`（默认 24）
 
 可选说明：
-- 如果 `CANVAS_TOKEN` 留空但配置了 `CANVAS_CALENDAR_FEED_URL`，系统会从日历 feed 补充 assignment 截止任务。
-- 如果两者都配置，系统会合并 API + feed 任务并自动去重。
+- 系统每 24 小时刷新一次 feed 缓存；刷新失败时会回退到最近一次缓存结果，避免任务列表为空。
+- 当前版本不再从邮件中提取待办任务。
 
 ### Outlook (Microsoft Graph, Delegated)
 1. 在 Azure Portal 注册应用
@@ -65,17 +65,12 @@ uvicorn app.main:app --reload --port 8000
 
 - `SCHEDULE_TIME=07:30` 表示每天早上 07:30 推送
 - `TIMEZONE=America/Los_Angeles`
-- `TASK_MODE=action_only` 只保留可行动任务（建议）
-- `TASK_NOISE_KEYWORDS` 过滤噪音通知（如 Assignment Graded）
-- `CANVAS_CALENDAR_FEED_URL` 可作为 Canvas API 的兜底来源，减少漏 assignment 风险
+- `CANVAS_CALENDAR_FEED_URL` Canvas 日历 feed 链接（待办唯一来源）
+- `CANVAS_FEED_REFRESH_HOURS=24` 每 24 小时更新 feed 缓存
 - `TASK_REQUIRE_DUE=true` 左栏仅展示带截止日期的任务
 - `PUSH_DUE_WITHIN_HOURS=48` 仅推送 48 小时内截止任务
 - `PUSH_PERSONA=auto` 到期任务推送风格（`auto/senior/cute`）
-- `LLM_API_KEY` + `LLM_MODEL` 启用邮件三分类与全文行动任务抽取（未配置时不从邮件生成待办任务）
-- `LLM_TRUSTED_SENDER_DOMAINS` 控制允许进入 LLM 行动抽取的发件人域名（默认 `.edu,instructure.com,canvaslms.com`）
-- `LLM_BLOCKED_SENDER_KEYWORDS` 对非可信域名邮件做词边界拦截（默认包含 `apartment,lease,housing...`）
-- `LLM_SENDER_ALLOWLIST` 精确地址白名单（优先级高于域名/关键词）
-- `LLM_SENDER_BLOCKLIST` 精确地址黑名单（最高优先级，可强制拦截）
+- `LLM_API_KEY` + `LLM_MODEL` 用于 Canvas 日历事件分类（作业任务 vs 通知/announcement）
 
 ## 4. Web 页面功能
 

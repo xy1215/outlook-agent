@@ -160,6 +160,18 @@ def test_is_due_soon_excludes_tasks_before_today_floor():
     assert service._is_due_soon(today_due, now)
 
 
+def test_filter_canvas_tasks_keeps_assignments_and_drops_notifications():
+    service = make_service()
+    now = datetime(2026, 2, 28, 2, 0, tzinfo=timezone.utc)
+    tasks = [
+        TaskItem(source="canvas_feed", title="HW5", details="Submit before deadline", due_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc)),
+        TaskItem(source="canvas_feed", title="Office Hours", details="Professor office hours session", due_at=datetime(2026, 3, 1, 1, 0, tzinfo=timezone.utc)),
+    ]
+    kept = asyncio.run(service._filter_canvas_tasks(tasks, now))
+    assert len(kept) == 1
+    assert kept[0].title == "HW5"
+
+
 def test_requires_due_filters_mail_without_deadline():
     service = make_service()
     now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)

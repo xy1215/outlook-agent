@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     canvas_base_url: str = Field(default="", alias="CANVAS_BASE_URL")
     canvas_token: str = Field(default="", alias="CANVAS_TOKEN")
     canvas_calendar_feed_url: str = Field(default="", alias="CANVAS_CALENDAR_FEED_URL")
+    canvas_feed_cache_path: str = Field(default="data/canvas_feed_cache.json", alias="CANVAS_FEED_CACHE_PATH")
+    canvas_feed_refresh_hours: int = Field(default=24, alias="CANVAS_FEED_REFRESH_HOURS")
 
     ms_tenant_id: str = Field(default="", alias="MS_TENANT_ID")
     ms_client_id: str = Field(default="", alias="MS_CLIENT_ID")
@@ -42,13 +44,6 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="", alias="LLM_MODEL")
     llm_timeout_sec: int = Field(default=12, alias="LLM_TIMEOUT_SEC")
     llm_max_parallel: int = Field(default=6, alias="LLM_MAX_PARALLEL")
-    llm_trusted_sender_domains: str = Field(default=".edu,instructure.com,canvaslms.com", alias="LLM_TRUSTED_SENDER_DOMAINS")
-    llm_blocked_sender_keywords: str = Field(
-        default="apartment,lease,housing,realtor,zillow,marketing,promo,discount,coupon,ad",
-        alias="LLM_BLOCKED_SENDER_KEYWORDS",
-    )
-    llm_sender_allowlist: str = Field(default="", alias="LLM_SENDER_ALLOWLIST")
-    llm_sender_blocklist: str = Field(default="", alias="LLM_SENDER_BLOCKLIST")
 
 
 settings = Settings()

@@ -13,7 +13,6 @@ from app.models import DailyDigest
 from app.scheduler import create_scheduler, daily_trigger
 from app.services.canvas_client import CanvasClient
 from app.services.digest_service import DigestService
-from app.services.mail_action_extractor import MailActionExtractor
 from app.services.mail_classifier import MailClassifier
 from app.services.notifier import Notifier
 from app.services.outlook_client import OutlookClient
@@ -27,6 +26,8 @@ canvas_client = CanvasClient(
     settings.canvas_token,
     settings.canvas_calendar_feed_url,
     settings.timezone,
+    settings.canvas_feed_cache_path,
+    settings.canvas_feed_refresh_hours,
 )
 outlook_client = OutlookClient(
     settings.ms_tenant_id,
@@ -45,18 +46,6 @@ mail_classifier = MailClassifier(
     llm_timeout_sec=settings.llm_timeout_sec,
     llm_max_parallel=settings.llm_max_parallel,
 )
-mail_action_extractor = MailActionExtractor(
-    timezone_name=settings.timezone,
-    llm_api_base=settings.llm_api_base,
-    llm_api_key=settings.llm_api_key,
-    llm_model=settings.llm_model,
-    llm_timeout_sec=settings.llm_timeout_sec,
-    llm_max_parallel=settings.llm_max_parallel,
-    trusted_sender_domains=settings.llm_trusted_sender_domains,
-    blocked_sender_keywords=settings.llm_blocked_sender_keywords,
-    sender_allowlist=settings.llm_sender_allowlist,
-    sender_blocklist=settings.llm_sender_blocklist,
-)
 digest_service = DigestService(
     canvas_client,
     outlook_client,
@@ -70,7 +59,11 @@ digest_service = DigestService(
     settings.push_due_within_hours,
     settings.push_persona,
     mail_classifier,
-    mail_action_extractor,
+    settings.llm_api_base,
+    settings.llm_api_key,
+    settings.llm_model,
+    settings.llm_timeout_sec,
+    settings.llm_max_parallel,
 )
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None

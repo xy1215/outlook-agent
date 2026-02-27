@@ -1,23 +1,35 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
+from pathlib import Path
 import re
 from zoneinfo import ZoneInfo
+
 import httpx
 
 from app.models import TaskItem
 
 
 class CanvasClient:
-    def __init__(self, base_url: str, token: str, calendar_feed_url: str = "", timezone_name: str = "America/Los_Angeles") -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        calendar_feed_url: str = "",
+        timezone_name: str = "America/Los_Angeles",
+        feed_cache_path: str = "data/canvas_feed_cache.json",
+        feed_refresh_hours: int = 24,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.calendar_feed_url = (calendar_feed_url or "").strip()
         self.timezone_name = timezone_name
+        self.feed_cache_path = Path(feed_cache_path)
+        self.feed_refresh_hours = max(1, feed_refresh_hours)
 
     @staticmethod
     def _decode_ics_text(value: str) -> str:
-        # ICS may escape commas, semicolons and newlines.
         return value.replace("\\n", "\n").replace("\\,", ",").replace("\\;", ";").replace("\\\\", "\\").strip()
 
     @staticmethod
@@ -84,6 +96,7 @@ class CanvasClient:
                     due_at=due_at,
                     published_at=published_at,
                     course=course,
+                    details=description or None,
                     url=url,
                     priority=2,
                 )
@@ -110,47 +123,41 @@ class CanvasClient:
         return tasks
 
     @staticmethod
-    def _merge_tasks(primary: list[TaskItem], secondary: list[TaskItem]) -> list[TaskItem]:
-        merged: list[TaskItem] = []
-        seen: set[str] = set()
-        for task in [*primary, *secondary]:
-            due_key = task.due_at.isoformat() if task.due_at else "none"
-            key = f"{task.title.strip().lower()}|{due_key}"
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(task)
-        return merged
+    def _serialize_task(task: TaskItem) -> dict:
+        return task.model_dump(mode="json")
 
-    async def _fetch_canvas_api_todo(self) -> list[TaskItem]:
-        if not self.base_url or not self.token:
-            return []
-        url = f"{self.base_url}/api/v1/users/self/todo"
-        headers = {"Authorization": f"Bearer {self.token}"}
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            rows = resp.json()
+    @staticmethod
+    def _deserialize_task(row: dict) -> TaskItem | None:
+        try:
+            return TaskItem.model_validate(row)
+        except Exception:
+            return None
 
-        items: list[TaskItem] = []
-        for row in rows:
-            assignment = row.get("assignment") or {}
-            due_at = assignment.get("due_at")
-            published = assignment.get("created_at") or row.get("created_at")
-            items.append(
-                TaskItem(
-                    source="canvas",
-                    title=assignment.get("name") or row.get("type", "Untitled task"),
-                    due_at=datetime.fromisoformat(due_at.replace("Z", "+00:00")) if due_at else None,
-                    published_at=datetime.fromisoformat(published.replace("Z", "+00:00")) if isinstance(published, str) and published else None,
-                    course=(row.get("context_name") or row.get("course") or "").strip() or None,
-                    url=assignment.get("html_url") or row.get("html_url"),
-                    priority=2,
-                )
-            )
-        return items
+    def _load_cache(self) -> tuple[datetime | None, list[TaskItem]]:
+        if not self.feed_cache_path.exists():
+            return None, []
+        try:
+            payload = json.loads(self.feed_cache_path.read_text(encoding="utf-8"))
+            fetched_at_raw = payload.get("fetched_at")
+            fetched_at = datetime.fromisoformat(fetched_at_raw) if isinstance(fetched_at_raw, str) else None
+            tasks = []
+            for row in payload.get("tasks", []):
+                task = self._deserialize_task(row)
+                if task is not None:
+                    tasks.append(task)
+            return fetched_at, tasks
+        except Exception:
+            return None, []
 
-    async def _fetch_canvas_feed_todo(self) -> list[TaskItem]:
+    def _save_cache(self, fetched_at: datetime, tasks: list[TaskItem]) -> None:
+        self.feed_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "fetched_at": fetched_at.isoformat(),
+            "tasks": [self._serialize_task(task) for task in tasks],
+        }
+        self.feed_cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    async def _fetch_canvas_feed_now(self) -> list[TaskItem]:
         if not self.calendar_feed_url:
             return []
         async with httpx.AsyncClient(timeout=20) as client:
@@ -159,14 +166,17 @@ class CanvasClient:
         return self._parse_ics_tasks(resp.text)
 
     async def fetch_todo(self) -> list[TaskItem]:
-        api_tasks: list[TaskItem] = []
-        feed_tasks: list[TaskItem] = []
+        if not self.calendar_feed_url:
+            return []
+
+        now = datetime.now(ZoneInfo("UTC"))
+        fetched_at, cached_tasks = self._load_cache()
+        if fetched_at is not None and now - fetched_at < timedelta(hours=self.feed_refresh_hours):
+            return cached_tasks
+
         try:
-            api_tasks = await self._fetch_canvas_api_todo()
+            fresh_tasks = await self._fetch_canvas_feed_now()
+            self._save_cache(now, fresh_tasks)
+            return fresh_tasks
         except Exception:
-            api_tasks = []
-        try:
-            feed_tasks = await self._fetch_canvas_feed_todo()
-        except Exception:
-            feed_tasks = []
-        return self._merge_tasks(api_tasks, feed_tasks)
+            return cached_tasks

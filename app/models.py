@@ -12,6 +12,7 @@ class TaskItem(BaseModel):
     due_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
     course: Optional[str] = None
+    details: Optional[str] = None
     url: Optional[str] = None
     priority: int = 1
 
