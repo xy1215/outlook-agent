@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -32,6 +32,21 @@ class LLMTaskExtractor:
         except Exception:
             return None
 
+    @staticmethod
+    def _normalize_due_year(due_at: datetime | None, reference: datetime) -> datetime | None:
+        if due_at is None:
+            return None
+        # If LLM outputs an obviously stale year for relative dates, shift toward reference date.
+        if due_at < reference - timedelta(days=120):
+            try:
+                adjusted = due_at.replace(year=reference.year)
+                if adjusted < reference - timedelta(days=2):
+                    adjusted = adjusted.replace(year=reference.year + 1)
+                return adjusted
+            except Exception:
+                return due_at
+        return due_at
+
     async def extract_tasks_from_mail(self, mail: MailItem, timezone_name: str) -> list[TaskItem]:
         if not self.is_configured():
             return []
@@ -46,9 +61,11 @@ class LLMTaskExtractor:
             "Rules:\n"
             "1) Keep only actionable tasks (assignments, quizzes, exams, participation).\n"
             "2) Use the provided timezone when interpreting relative times.\n"
+            "2.1) Use email received date as reference for relative dates like today/tomorrow/Thursday.\n"
             "3) If uncertain about due date, set due_at_iso to null.\n"
             "4) Keep title concise and specific.\n\n"
             f"Timezone: {timezone_name}\n"
+            f"Email received at: {mail.received_at.isoformat()}\n"
             f"Subject: {mail.subject}\n"
             f"Sender: {mail.sender}\n"
             f"Preview: {mail.preview}\n"
@@ -85,11 +102,12 @@ class LLMTaskExtractor:
             title = (row.get("title") or "").strip()
             if not title:
                 continue
+            parsed_due = self._normalize_due_year(self._parse_due(row.get("due_at_iso")), mail.received_at)
             tasks.append(
                 TaskItem(
                     source="llm_mail_extract",
                     title=title,
-                    due_at=self._parse_due(row.get("due_at_iso")),
+                    due_at=parsed_due,
                     course=None,
                     url=mail.url,
                     priority=2,

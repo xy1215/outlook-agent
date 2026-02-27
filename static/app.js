@@ -39,7 +39,8 @@ async function loadDigest() {
     data.tasks.forEach((task) => {
       const li = document.createElement('li');
       const due = task.due_at ? new Date(task.due_at).toLocaleString() : '待定';
-      li.innerHTML = `<strong>${due}</strong> | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}`;
+      const src = task.source === 'llm_mail_extract' ? '[LLM]' : '[规则]';
+      li.innerHTML = `<strong>${due}</strong> ${src} | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}`;
       tasks.appendChild(li);
     });
   }

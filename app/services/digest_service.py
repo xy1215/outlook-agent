@@ -19,7 +19,7 @@ class DigestService:
         lookahead_days: int,
         important_keywords: str,
         task_mode: str = "action_only",
-        task_action_keywords: str = "due,deadline,exam,quiz,submission,homework,hw,project,midterm,final,participation,lab",
+        task_action_keywords: str = "due,deadline,exam,quiz,submission,assignment,homework,hw,project,midterm,final,participation,lab",
         task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,announcement posted",
         task_require_due: bool = True,
         push_due_within_hours: int = 48,
@@ -68,6 +68,28 @@ class DigestService:
     def _clean_task_title(raw: str) -> str:
         text = re.sub(r"\s+", " ", raw).strip(" -:|")
         return text or "Canvas task"
+
+    @staticmethod
+    def _normalize_title_for_key(title: str) -> str:
+        t = title.lower()
+        t = re.sub(r"access code.*$", " ", t)
+        t = re.sub(r"\([^)]*\)", " ", t)
+        t = re.sub(r"[^a-z0-9\s]", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    @staticmethod
+    def _is_generic_task_title(title: str) -> bool:
+        t = title.lower().strip()
+        generic_phrases = [
+            "recent canvas notifications",
+            "this week's deadlines",
+            "weekly deadlines",
+            "canvas announcement",
+            "course announcement",
+            "check out upcoming deadlines",
+        ]
+        return any(p in t for p in generic_phrases)
 
     def _parse_deadline_from_text(self, text: str, now: datetime) -> datetime | None:
         local_tz = ZoneInfo(self.timezone_name)
@@ -126,7 +148,7 @@ class DigestService:
                         hour = 0
             try:
                 parsed = datetime.strptime(f"{year}/{mmdd} {hour:02d}:{minute:02d}", "%Y/%m/%d %H:%M").replace(tzinfo=local_tz)
-                if not year_part and parsed < now - timedelta(days=1):
+                if not year_part and parsed < now - timedelta(days=180):
                     parsed = parsed.replace(year=year + 1)
                 return parsed
             except ValueError:
@@ -159,7 +181,7 @@ class DigestService:
                         hour = 0
             try:
                 parsed = datetime(year, month_number, day, hour, minute, tzinfo=local_tz)
-                if not month_match.group(3) and parsed < now - timedelta(days=1):
+                if not month_match.group(3) and parsed < now - timedelta(days=180):
                     parsed = parsed.replace(year=year + 1)
                 return parsed
             except ValueError:
@@ -229,6 +251,12 @@ class DigestService:
 
             # Prefer actionable bullet lines immediately after the due marker.
             candidates: list[str] = []
+            # Some announcements put task name on the same line after the due timestamp.
+            inline_tail = re.split(r"(?:am|pm|AM|PM|central time|ct)\b", line, maxsplit=1)
+            if len(inline_tail) > 1:
+                tail = inline_tail[1].strip(" -:|")
+                if tail and self._is_action_line(tail):
+                    candidates.append(tail)
             for j in range(idx + 1, min(idx + 6, len(lines))):
                 nxt = lines[j]
                 if self._parse_deadline_from_text(nxt, now) is not None:
@@ -314,8 +342,10 @@ class DigestService:
         seen: set[str] = set()
         merged: list[TaskItem] = []
         for task in [*primary, *fallback]:
+            if DigestService._is_generic_task_title(task.title):
+                continue
             due_key = task.due_at.isoformat() if task.due_at else "none"
-            key = f"{task.title.lower()}|{due_key}"
+            key = f"{DigestService._normalize_title_for_key(task.title)}|{due_key}"
             if key in seen:
                 continue
             seen.add(key)
@@ -338,6 +368,14 @@ class DigestService:
                 except Exception:
                     extracted = []
                 for task in extracted:
+                    if self._is_generic_task_title(task.title):
+                        continue
+                    if self.task_mode == "action_only":
+                        low_t = task.title.lower()
+                        if not any(k in low_t for k in self.action_keywords):
+                            continue
+                        if any(k in low_t for k in self.noise_keywords):
+                            continue
                     if self.task_require_due and task.due_at is None:
                         continue
                     if not self._is_due_soon(task, now):
