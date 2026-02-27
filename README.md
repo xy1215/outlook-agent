@@ -67,8 +67,10 @@ uvicorn app.main:app --reload --port 8000
 - `TASK_NOISE_KEYWORDS` 过滤噪音通知（如 Assignment Graded）
 - `TASK_REQUIRE_DUE=true` 左栏仅展示带截止日期的任务
 - `PUSH_DUE_WITHIN_HOURS=48` 仅推送 48 小时内截止任务
+- `PUSH_TONE=学姐风` 或 `可爱风`，控制即将截止任务的推送语气
 - `LLM_ENABLED=true` 可开启 LLM 二阶段提取（从长正文中补抓 deadline 任务）
 - `LLM_MAX_MAILS=8` 控制每次最多送入 LLM 的邮件数
+- `LLM_BASE_URL`/`LLM_MODEL` 可切换兼容 OpenAI Chat Completions 的模型服务
 
 ## 4. Web 页面功能
 
@@ -76,11 +78,12 @@ uvicorn app.main:app --reload --port 8000
 - `断开 Outlook`: 删除本地 token，重新授权
 - `刷新摘要`: 读取并展示当天数据
 - `立即执行并推送`: 立即拉取 Outlook（和可选 Canvas）并发 iPhone 推送
+- 页面会展示邮件三分类：`立刻处理`、`本周待办`、`信息参考`
+- 页面会展示一段推送预览文案（含学姐风/可爱风催办）
 
 ## 5. 后续升级建议
 
 - 推送升级为 Telegram Bot / Slack / 企业微信多通道
-- 引入 LLM 总结邮件和任务优先级
 - 增加 OAuth 登录和本地数据库
 - 部署到云服务器（Railway/Fly.io/Render）实现 24x7 自动运行
 

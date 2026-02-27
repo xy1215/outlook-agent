@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import json
+import math
 import re
 from zoneinfo import ZoneInfo
+
+import httpx
 
 REL_DUE_RE = re.compile(r"\b(today|tomorrow)\b(?:\s+(?:at\s+)?)?(\d{1,2}:\d{2})?\s*(am|pm|AM|PM)?")
 ISO_DUE_RE = re.compile(r"(20\d{2}-\d{1,2}-\d{1,2})(?:\s+(\d{1,2}:\d{2}))?")
@@ -14,7 +18,7 @@ MONTH_DUE_RE = re.compile(
     r")\s+(\d{1,2})(?:,\s*(20\d{2}))?(?:\s+(?:at\s+)?(\d{1,2}:\d{2})\s*(AM|PM|am|pm)?)?"
 )
 
-from app.models import DailyDigest, MailItem, TaskItem
+from app.models import DailyDigest, MailBuckets, MailItem, TaskItem
 from app.services.canvas_client import CanvasClient
 from app.services.llm_client import LLMTaskExtractor
 from app.services.outlook_client import OutlookClient
@@ -33,9 +37,13 @@ class DigestService:
         task_noise_keywords: str = "assignment graded,graded:,office hours moved,daily digest,announcement posted",
         task_require_due: bool = True,
         push_due_within_hours: int = 48,
+        push_tone: str = "学姐风",
         llm_enabled: bool = False,
         llm_max_mails: int = 8,
         llm_client: LLMTaskExtractor | None = None,
+        llm_api_key: str = "",
+        llm_base_url: str = "https://api.openai.com/v1",
+        llm_model: str = "gpt-4o-mini",
     ) -> None:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
@@ -48,9 +56,13 @@ class DigestService:
         self.noise_keywords = [k.strip().lower() for k in task_noise_keywords.split(",") if k.strip()]
         self.task_require_due = task_require_due
         self.push_due_within_hours = push_due_within_hours
+        self.push_tone = (push_tone or "学姐风").strip()
         self.llm_enabled = llm_enabled
         self.llm_max_mails = llm_max_mails
         self.llm_client = llm_client
+        self.llm_api_key = llm_api_key
+        self.llm_base_url = (llm_base_url or "https://api.openai.com/v1").rstrip("/")
+        self.llm_model = llm_model or "gpt-4o-mini"
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -357,13 +369,159 @@ class DigestService:
             merged.append(task)
         return merged
 
+    @staticmethod
+    def _extract_json_object(text: str) -> str:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        return match.group(0) if match else text
+
+    async def _classify_mails_with_llm(self, mails: list[MailItem]) -> dict[int, str]:
+        if not self.llm_enabled or not mails:
+            return {}
+
+        api_key = self.llm_api_key or (self.llm_client.api_key if self.llm_client else "")
+        model = self.llm_model or (self.llm_client.model if self.llm_client else "")
+        if not api_key or not model:
+            return {}
+
+        payload_mails = []
+        for idx, mail in enumerate(mails):
+            payload_mails.append(
+                {
+                    "index": idx,
+                    "subject": mail.subject,
+                    "sender": mail.sender,
+                    "preview": mail.preview[:280],
+                    "received_at": mail.received_at.isoformat(),
+                }
+            )
+
+        system_prompt = (
+            "You are an email triage assistant. Classify each mail into exactly one category: "
+            "immediate_action, week_todo, info_reference. "
+            "Use immediate_action for urgent/deadline-soon tasks, week_todo for actionable work this week, "
+            "and info_reference for read-only informational updates. "
+            "Return JSON object only, with integer-string index keys and category values."
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(
+                    f"{self.llm_base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "temperature": 0,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": json.dumps(payload_mails, ensure_ascii=False)},
+                        ],
+                    },
+                )
+                response.raise_for_status()
+        except Exception:
+            return {}
+
+        try:
+            content = response.json()["choices"][0]["message"]["content"]
+            parsed = json.loads(self._extract_json_object(content))
+            categories = {"immediate_action", "week_todo", "info_reference"}
+            normalized: dict[int, str] = {}
+            for raw_idx, raw_bucket in parsed.items():
+                bucket = str(raw_bucket).strip()
+                if bucket not in categories:
+                    continue
+                idx = int(raw_idx)
+                normalized[idx] = bucket
+            return normalized
+        except Exception:
+            return {}
+
+    def _fallback_mail_bucket(self, mail: MailItem, mail_tasks: list[TaskItem], now: datetime) -> str:
+        text = f"{mail.subject} {mail.preview} {mail.body_text[:600]}".lower()
+        urgent_keywords = ("urgent", "asap", "immediately", "final notice", "最后提醒", "立即", "马上", "截止")
+
+        due_candidates = [
+            task.due_at.astimezone(self.local_tz)
+            for task in mail_tasks
+            if task.due_at is not None
+        ]
+        due_at = min(due_candidates) if due_candidates else self._parse_deadline_from_text(text, now)
+
+        if due_at is not None and due_at <= now + timedelta(hours=48):
+            return "immediate_action"
+        if any(keyword in text for keyword in urgent_keywords):
+            return "immediate_action"
+
+        if due_at is not None and due_at <= now + timedelta(days=7):
+            return "week_todo"
+        if self._is_actionable(mail, due_at) or self._is_mail_important(mail):
+            return "week_todo"
+
+        return "info_reference"
+
+    async def _bucket_mails(self, mails: list[MailItem], mail_tasks_by_idx: dict[int, list[TaskItem]], now: datetime) -> MailBuckets:
+        llm_result = await self._classify_mails_with_llm(mails)
+        buckets = MailBuckets()
+
+        for idx, mail in enumerate(mails):
+            bucket = llm_result.get(idx)
+            if bucket is None:
+                bucket = self._fallback_mail_bucket(mail, mail_tasks_by_idx.get(idx, []), now)
+
+            if bucket == "immediate_action":
+                buckets.immediate_action.append(mail)
+            elif bucket == "week_todo":
+                buckets.week_todo.append(mail)
+            else:
+                buckets.info_reference.append(mail)
+
+        buckets.immediate_action.sort(key=lambda x: x.received_at, reverse=True)
+        buckets.week_todo.sort(key=lambda x: x.received_at, reverse=True)
+        buckets.info_reference.sort(key=lambda x: x.received_at, reverse=True)
+        return buckets
+
+    def _personalized_push_line(self, push_tasks: list[TaskItem], now: datetime) -> str:
+        tone = (self.push_tone or "学姐风").strip()
+        is_cute = "可爱" in tone
+
+        if not push_tasks:
+            if is_cute:
+                return "可爱提醒: 今天节奏很稳，记得抽 15 分钟整理下本周任务喔。"
+            return "学姐提醒: 今天没有紧急截止，建议现在把本周任务先排进日程。"
+
+        first = push_tasks[0]
+        due_local = first.due_at.astimezone(self.local_tz) if first.due_at else now
+        seconds_left = max((due_local - now).total_seconds(), 0)
+        hours_left = max(math.ceil(seconds_left / 3600), 0)
+
+        if is_cute:
+            return (
+                f"可爱提醒: {first.title} 还剩大约 {hours_left} 小时截止啦，"
+                "现在动手最轻松，冲呀。"
+            )
+
+        return (
+            f"学姐提醒: {first.title} 距离截止约 {hours_left} 小时，"
+            "先把这件事做完，今天就稳了。"
+        )
+
     async def build(self) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
         try:
             mails = await self.outlook_client.fetch_recent_messages()
         except Exception:
             mails = []
-        tasks_from_mail = [task for mail in mails for task in self._tasks_from_mail(mail, now)]
+
+        mail_tasks_by_idx: dict[int, list[TaskItem]] = {}
+        tasks_from_mail: list[TaskItem] = []
+        for idx, mail in enumerate(mails):
+            parsed_tasks = self._tasks_from_mail(mail, now)
+            mail_tasks_by_idx[idx] = parsed_tasks
+            tasks_from_mail.extend(parsed_tasks)
+
         llm_tasks: list[TaskItem] = []
         if self.llm_enabled and self.llm_client and self.llm_client.is_configured():
             llm_candidates = [m for m in mails if self._looks_like_canvas_mail(m) and not self._is_noise_mail(m)]
@@ -399,22 +557,26 @@ class DigestService:
 
         due_tasks = [t for t in tasks if self._is_due_soon(t, now)]
         important_mails = [m for m in mails if self._is_mail_important(m)]
+        mail_buckets = await self._bucket_mails(mails, mail_tasks_by_idx, now)
 
         due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=self.local_tz))
         important_mails.sort(key=lambda x: x.received_at, reverse=True)
 
         summary = (
             f"今天有 {len(due_tasks)} 个待办（邮件解析+Canvas可选），"
-            f"{len(important_mails)} 封重要邮件（Outlook）。"
+            f"立刻处理 {len(mail_buckets.immediate_action)} 封，本周待办 {len(mail_buckets.week_todo)} 封。"
         )
 
-        return DailyDigest(
+        digest = DailyDigest(
             generated_at=now,
             date_label=now.strftime("%Y-%m-%d"),
             tasks=due_tasks,
             important_mails=important_mails,
+            mail_buckets=mail_buckets,
             summary_text=summary,
         )
+        digest.push_preview = self.to_push_text(digest)
+        return digest
 
     def to_push_text(self, digest: DailyDigest) -> str:
         now = digest.generated_at
@@ -428,10 +590,13 @@ class DigestService:
             if due_floor <= due_local <= due_limit:
                 push_tasks.append(task)
 
-        lines = [digest.summary_text]
+        lines = [digest.summary_text, self._personalized_push_line(push_tasks, now)]
         for task in push_tasks[:5]:
             due = task.due_at.strftime("%m-%d %H:%M") if task.due_at else "无截止时间"
             lines.append(f"[任务] {task.title} | {due}")
-        for mail in digest.important_mails[:3]:
+
+        focus_mails = digest.mail_buckets.immediate_action or digest.important_mails
+        for mail in focus_mails[:3]:
             lines.append(f"[邮件] {mail.subject} | {mail.sender}")
+
         return "\n".join(lines)

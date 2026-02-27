@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 from app.models import DailyDigest, MailItem, TaskItem
@@ -10,14 +11,17 @@ class DummyCanvasClient:
 
 
 class DummyOutlookClient:
+    def __init__(self, mails=None):
+        self.mails = mails or []
+
     async def fetch_recent_messages(self, max_count: int = 20):
-        return []
+        return self.mails
 
 
-def make_service() -> DigestService:
+def make_service(outlook_client=None, push_tone="学姐风") -> DigestService:
     return DigestService(
         canvas_client=DummyCanvasClient(),
-        outlook_client=DummyOutlookClient(),
+        outlook_client=outlook_client or DummyOutlookClient(),
         timezone_name="America/Los_Angeles",
         lookahead_days=7,
         important_keywords="urgent,important,deadline,exam,quiz,project",
@@ -26,6 +30,11 @@ def make_service() -> DigestService:
         task_noise_keywords="assignment graded,graded:,office hours moved,daily digest,announcement posted",
         task_require_due=True,
         push_due_within_hours=48,
+        push_tone=push_tone,
+        llm_enabled=False,
+        llm_api_key="",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-4o-mini",
     )
 
 
@@ -177,3 +186,46 @@ def test_extracts_multiple_tasks_from_body_due_blocks():
     titles = [t.title for t in tasks]
     assert any("Participation for Guest Speaker" in t for t in titles)
     assert any("Chapter 5 Quiz" in t for t in titles)
+
+
+def test_build_generates_mail_buckets():
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mails = [
+        MailItem(
+            subject="Assignment: HW 4 due 2026-02-26 23:59",
+            sender="notifications@instructure.com",
+            received_at=now,
+            preview="Please submit before deadline.",
+            is_important=False,
+            url=None,
+        ),
+        MailItem(
+            subject="Weekly campus newsletter",
+            sender="news@school.edu",
+            received_at=now,
+            preview="Events and highlights this week.",
+            is_important=False,
+            url=None,
+        ),
+    ]
+    service = make_service(outlook_client=DummyOutlookClient(mails=mails))
+    digest = asyncio.run(service.build())
+    assert len(digest.mail_buckets.immediate_action) == 1
+    assert digest.mail_buckets.immediate_action[0].subject.startswith("Assignment")
+    assert len(digest.mail_buckets.info_reference) == 1
+
+
+def test_push_text_uses_cute_tone():
+    service = make_service(push_tone="可爱风")
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    digest = DailyDigest(
+        generated_at=now,
+        date_label="2026-02-25",
+        tasks=[
+            TaskItem(source="outlook_canvas_mail", title="Near due", due_at=datetime(2026, 2, 25, 12, 0, tzinfo=timezone.utc)),
+        ],
+        important_mails=[],
+        summary_text="s",
+    )
+    text = service.to_push_text(digest)
+    assert "可爱提醒" in text

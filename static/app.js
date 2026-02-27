@@ -28,6 +28,7 @@ async function loadDigest() {
   const data = await res.json();
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
+  document.getElementById('pushPreview').textContent = data.push_preview || '暂无推送预览';
 
   const tasks = document.getElementById('tasks');
   tasks.innerHTML = '';
@@ -45,19 +46,25 @@ async function loadDigest() {
     });
   }
 
-  const mails = document.getElementById('mails');
-  mails.innerHTML = '';
-  if (!data.important_mails.length) {
+  renderMailBucket('mailImmediate', data.mail_buckets?.immediate_action || [], '暂无立刻处理邮件');
+  renderMailBucket('mailWeek', data.mail_buckets?.week_todo || [], '暂无本周待办邮件');
+  renderMailBucket('mailInfo', data.mail_buckets?.info_reference || [], '暂无信息参考邮件');
+}
+
+function renderMailBucket(elementId, mails, emptyText) {
+  const el = document.getElementById(elementId);
+  el.innerHTML = '';
+  if (!mails.length) {
     const li = document.createElement('li');
-    li.textContent = '今天没有重要邮件';
-    mails.appendChild(li);
-  } else {
-    data.important_mails.forEach((mail) => {
-      const li = document.createElement('li');
-      li.innerHTML = `${mail.subject} - ${mail.sender} ${mail.url ? `<a href="${mail.url}" target="_blank">打开</a>` : ''}`;
-      mails.appendChild(li);
-    });
+    li.textContent = emptyText;
+    el.appendChild(li);
+    return;
   }
+  mails.forEach((mail) => {
+    const li = document.createElement('li');
+    li.innerHTML = `${mail.subject} - ${mail.sender} ${mail.url ? `<a href="${mail.url}" target="_blank">打开</a>` : ''}`;
+    el.appendChild(li);
+  });
 }
 
 async function runNow() {

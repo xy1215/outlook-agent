@@ -49,9 +49,13 @@ digest_service = DigestService(
     settings.task_noise_keywords,
     settings.task_require_due,
     settings.push_due_within_hours,
+    settings.push_tone,
     settings.llm_enabled,
     settings.llm_max_mails,
     llm_task_extractor,
+    settings.llm_api_key,
+    settings.llm_base_url,
+    settings.llm_model,
 )
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None

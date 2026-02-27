@@ -65,6 +65,33 @@ button {
 }
 
 h2, h3 { margin-top: 0; }
+h4 {
+  margin: 8px 0;
+  color: #111827;
+}
 ul { margin: 0; padding-left: 18px; }
 li { margin-bottom: 8px; color: var(--muted); }
 a { color: var(--primary); }
+
+.mail-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.push-preview {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+@media (min-width: 760px) {
+  .mail-columns {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
