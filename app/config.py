@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     llm_api_base: str = Field(default="https://api.openai.com/v1", alias="LLM_API_BASE")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_model: str = Field(default="", alias="LLM_MODEL")
+    llm_timeout_sec: int = Field(default=12, alias="LLM_TIMEOUT_SEC")
+    llm_max_parallel: int = Field(default=6, alias="LLM_MAX_PARALLEL")
 
 
 settings = Settings()

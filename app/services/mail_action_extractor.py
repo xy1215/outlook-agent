@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import json
-from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -23,11 +23,15 @@ class MailActionExtractor:
         llm_api_base: str = "https://api.openai.com/v1",
         llm_api_key: str = "",
         llm_model: str = "",
+        llm_timeout_sec: int = 12,
+        llm_max_parallel: int = 6,
     ) -> None:
         self.timezone_name = timezone_name
         self.llm_api_base = llm_api_base.rstrip("/")
         self.llm_api_key = llm_api_key.strip()
         self.llm_model = llm_model.strip()
+        self.llm_timeout_sec = max(3, llm_timeout_sec)
+        self.llm_max_parallel = max(1, llm_max_parallel)
 
     @staticmethod
     def _parse_dt(value: str | None) -> datetime | None:
@@ -81,7 +85,7 @@ class MailActionExtractor:
 
         headers = {"Authorization": f"Bearer {self.llm_api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
+            async with httpx.AsyncClient(timeout=self.llm_timeout_sec) as client:
                 resp = await client.post(f"{self.llm_api_base}/chat/completions", json=payload, headers=headers)
                 resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"]
@@ -123,12 +127,21 @@ class MailActionExtractor:
         return tasks, best_due
 
     async def extract(self, mails: list[MailItem], now: datetime) -> MailActionScan:
+        if not self.llm_api_key or not self.llm_model:
+            return MailActionScan(tasks=[], due_map={idx: None for idx, _ in enumerate(mails)})
+
         tasks: list[TaskItem] = []
         due_map: dict[int, datetime | None] = {}
+        lock = asyncio.Lock()
+        sem = asyncio.Semaphore(self.llm_max_parallel)
 
-        for idx, mail in enumerate(mails):
-            extracted, best_due = await self._llm_extract_one(mail, now)
-            due_map[idx] = best_due
-            tasks.extend(extracted)
+        async def scan_one(idx: int, mail: MailItem) -> None:
+            async with sem:
+                extracted, best_due = await self._llm_extract_one(mail, now)
+            async with lock:
+                due_map[idx] = best_due
+                tasks.extend(extracted)
+
+        await asyncio.gather(*(scan_one(idx, mail) for idx, mail in enumerate(mails)))
 
         return MailActionScan(tasks=tasks, due_map=due_map)

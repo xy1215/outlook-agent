@@ -43,6 +43,8 @@ mail_action_extractor = MailActionExtractor(
     llm_api_base=settings.llm_api_base,
     llm_api_key=settings.llm_api_key,
     llm_model=settings.llm_model,
+    llm_timeout_sec=settings.llm_timeout_sec,
+    llm_max_parallel=settings.llm_max_parallel,
 )
 digest_service = DigestService(
     canvas_client,
