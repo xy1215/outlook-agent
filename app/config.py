@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     ms_user_email: str = Field(default="", alias="MS_USER_EMAIL")
     ms_redirect_uri: str = Field(default="http://127.0.0.1:8000/auth/callback", alias="MS_REDIRECT_URI")
     ms_token_store_path: str = Field(default="data/ms_token.json", alias="MS_TOKEN_STORE_PATH")
+    ms_mail_cache_ttl_sec: int = Field(default=60, alias="MS_MAIL_CACHE_TTL_SEC")
 
     push_provider: str = Field(default="pushover", alias="PUSH_PROVIDER")
     pushover_app_token: str = Field(default="", alias="PUSHOVER_APP_TOKEN")

@@ -29,6 +29,7 @@ outlook_client = OutlookClient(
     settings.ms_user_email,
     settings.ms_redirect_uri,
     settings.ms_token_store_path,
+    settings.ms_mail_cache_ttl_sec,
 )
 notifier = Notifier(settings.push_provider, settings.pushover_app_token, settings.pushover_user_key)
 llm_task_extractor = LLMTaskExtractor(
