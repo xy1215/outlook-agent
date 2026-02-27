@@ -22,7 +22,12 @@ app = FastAPI(title="Campus Daily Agent", version="0.1.0")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-canvas_client = CanvasClient(settings.canvas_base_url, settings.canvas_token)
+canvas_client = CanvasClient(
+    settings.canvas_base_url,
+    settings.canvas_token,
+    settings.canvas_calendar_feed_url,
+    settings.timezone,
+)
 outlook_client = OutlookClient(
     settings.ms_tenant_id,
     settings.ms_client_id,

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
 
     canvas_base_url: str = Field(default="", alias="CANVAS_BASE_URL")
     canvas_token: str = Field(default="", alias="CANVAS_TOKEN")
+    canvas_calendar_feed_url: str = Field(default="", alias="CANVAS_CALENDAR_FEED_URL")
 
     ms_tenant_id: str = Field(default="", alias="MS_TENANT_ID")
     ms_client_id: str = Field(default="", alias="MS_CLIENT_ID")
