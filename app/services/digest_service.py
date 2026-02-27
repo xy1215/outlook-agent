@@ -365,6 +365,7 @@ class DigestService:
             f"{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
         )
 
+        resolved_style = self._resolve_push_style(due_tasks, now)
         digest = DailyDigest(
             generated_at=now,
             date_label=now.strftime("%Y-%m-%d"),
@@ -374,8 +375,10 @@ class DigestService:
             mails_immediate=mails_immediate,
             mails_weekly=mails_weekly,
             mails_reference=mails_reference,
+            due_push_style=resolved_style,
         )
-        digest.due_push_style = self._resolve_push_style(digest.tasks, now)
+        digest.push_preview_senior = self._to_push_text_with_style(digest, "学姐风")
+        digest.push_preview_cute = self._to_push_text_with_style(digest, "可爱风")
         digest.push_preview = self.to_push_text(digest)
         return digest
 
@@ -423,7 +426,7 @@ class DigestService:
             "现在就开工 25 分钟，先交可提交版本，别把主动权让给ddl。"
         )
 
-    def to_push_text(self, digest: DailyDigest) -> str:
+    def _to_push_text_with_style(self, digest: DailyDigest, style: str) -> str:
         now = digest.generated_at
         due_limit = now + timedelta(hours=self.push_due_within_hours)
         due_floor = now - timedelta(hours=24)
@@ -435,7 +438,6 @@ class DigestService:
             if due_floor <= due_local <= due_limit:
                 push_tasks.append(task)
 
-        style = digest.due_push_style or self._resolve_push_style(digest.tasks, now)
         lines = [digest.summary_text, f"[催办风格] {style}", self._build_persona_nudge(push_tasks, now, style)]
         for task in push_tasks[:5]:
             due = task.due_at.strftime("%m-%d %H:%M") if task.due_at else "无截止时间"
@@ -447,3 +449,7 @@ class DigestService:
         for mail in digest.important_mails[:2]:
             lines.append(f"[邮件] {mail.subject} | {mail.sender}")
         return "\n".join(lines)
+
+    def to_push_text(self, digest: DailyDigest) -> str:
+        style = digest.due_push_style or self._resolve_push_style(digest.tasks, digest.generated_at)
+        return self._to_push_text_with_style(digest, style)

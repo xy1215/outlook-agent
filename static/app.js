@@ -34,6 +34,8 @@ async function loadDigest() {
     `信息参考 ${ (data.mails_reference || []).length } 封`;
   document.getElementById('pushStyle').textContent = `催办风格：${data.due_push_style || '未设置'}`;
   document.getElementById('pushPreview').textContent = data.push_preview || '暂无推送预览';
+  document.getElementById('pushPreviewSenior').textContent = data.push_preview_senior || '暂无学姐风预览';
+  document.getElementById('pushPreviewCute').textContent = data.push_preview_cute || '暂无可爱风预览';
 
   const tasks = document.getElementById('tasks');
   tasks.innerHTML = '';

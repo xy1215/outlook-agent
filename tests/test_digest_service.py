@@ -273,3 +273,24 @@ def test_resolve_push_style_for_auto_persona():
     )
     digest.due_push_style = service._resolve_push_style(digest.tasks, now)
     assert digest.due_push_style == "学姐风"
+
+
+def test_push_text_dual_style_previews():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    digest = DailyDigest(
+        generated_at=now,
+        date_label="2026-02-25",
+        tasks=[
+            TaskItem(source="outlook_canvas_mail", title="Chapter quiz", due_at=datetime(2026, 2, 26, 0, 0, tzinfo=timezone.utc)),
+        ],
+        important_mails=[],
+        summary_text="s",
+        mails_immediate=[],
+        mails_weekly=[],
+        mails_reference=[],
+    )
+    senior = service._to_push_text_with_style(digest, "学姐风")
+    cute = service._to_push_text_with_style(digest, "可爱风")
+    assert "[催办风格] 学姐风" in senior
+    assert "[催办风格] 可爱风" in cute
