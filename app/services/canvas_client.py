@@ -27,11 +27,13 @@ class CanvasClient:
         for row in rows:
             assignment = row.get("assignment") or {}
             due_at = assignment.get("due_at")
+            published = assignment.get("created_at") or row.get("created_at")
             items.append(
                 TaskItem(
                     source="canvas",
                     title=assignment.get("name") or row.get("type", "Untitled task"),
                     due_at=datetime.fromisoformat(due_at.replace("Z", "+00:00")) if due_at else None,
+                    published_at=datetime.fromisoformat(published.replace("Z", "+00:00")) if isinstance(published, str) and published else None,
                     course=(row.get("context_name") or row.get("course") or "").strip() or None,
                     url=assignment.get("html_url") or row.get("html_url"),
                     priority=2,

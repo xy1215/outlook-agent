@@ -13,6 +13,7 @@ from app.models import DailyDigest
 from app.scheduler import create_scheduler, daily_trigger
 from app.services.canvas_client import CanvasClient
 from app.services.digest_service import DigestService
+from app.services.mail_action_extractor import MailActionExtractor
 from app.services.mail_classifier import MailClassifier
 from app.services.notifier import Notifier
 from app.services.outlook_client import OutlookClient
@@ -37,6 +38,12 @@ mail_classifier = MailClassifier(
     llm_api_key=settings.llm_api_key,
     llm_model=settings.llm_model,
 )
+mail_action_extractor = MailActionExtractor(
+    timezone_name=settings.timezone,
+    llm_api_base=settings.llm_api_base,
+    llm_api_key=settings.llm_api_key,
+    llm_model=settings.llm_model,
+)
 digest_service = DigestService(
     canvas_client,
     outlook_client,
@@ -50,6 +57,7 @@ digest_service = DigestService(
     settings.push_due_within_hours,
     settings.push_persona,
     mail_classifier,
+    mail_action_extractor,
 )
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None

@@ -26,6 +26,7 @@ async function loadAuthStatus() {
 async function loadDigest() {
   const res = await fetch('/api/today');
   const data = await res.json();
+  const nowTs = data.generated_at ? new Date(data.generated_at).getTime() : Date.now();
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
   document.getElementById('triageSummary').textContent =
@@ -48,7 +49,23 @@ async function loadDigest() {
     data.tasks.forEach((task) => {
       const li = document.createElement('li');
       const due = task.due_at ? new Date(task.due_at).toLocaleString() : '待定';
-      li.innerHTML = `<strong>${due}</strong> | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}`;
+      const dueTs = task.due_at ? new Date(task.due_at).getTime() : null;
+      const publishedTs = task.published_at
+        ? new Date(task.published_at).getTime()
+        : (dueTs ? dueTs - 72 * 3600 * 1000 : nowTs);
+      const total = dueTs ? Math.max(1, dueTs - publishedTs) : 1;
+      const elapsed = dueTs ? Math.max(0, Math.min(total, nowTs - publishedTs)) : 0;
+      const ratio = dueTs ? Math.max(0, Math.min(1, elapsed / total)) : 0;
+      const hoursLeft = dueTs ? (dueTs - nowTs) / 3600000 : 999;
+      const isRed = dueTs && hoursLeft <= 6;
+      const barClass = isRed ? 'ddl-fill ddl-fill-red breathing' : 'ddl-fill';
+      const status = dueTs ? `进度 ${(ratio * 100).toFixed(0)}%` : '无 DDL 进度';
+
+      li.innerHTML = `
+        <div><strong>${due}</strong> | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}</div>
+        <div class="ddl-track"><div class="${barClass}" style="width:${(ratio * 100).toFixed(1)}%"></div></div>
+        <div class="ddl-meta">${status}${isRed ? ' · 红色警戒（<=6h）' : ''}</div>
+      `;
       tasks.appendChild(li);
     });
   }

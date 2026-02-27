@@ -5,6 +5,7 @@ import re
 from zoneinfo import ZoneInfo
 
 from app.models import DailyDigest, MailItem, TaskItem
+from app.services.mail_action_extractor import MailActionExtractor
 from app.services.canvas_client import CanvasClient
 from app.services.mail_classifier import MailClassifier
 from app.services.outlook_client import OutlookClient
@@ -25,6 +26,7 @@ class DigestService:
         push_due_within_hours: int = 48,
         push_persona: str = "auto",
         mail_classifier: MailClassifier | None = None,
+        mail_action_extractor: MailActionExtractor | None = None,
     ) -> None:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
@@ -38,6 +40,7 @@ class DigestService:
         self.push_due_within_hours = push_due_within_hours
         self.push_persona = (push_persona or "auto").strip().lower()
         self.mail_classifier = mail_classifier
+        self.mail_action_extractor = mail_action_extractor
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -324,13 +327,32 @@ class DigestService:
             merged.append(task)
         return merged
 
+    @staticmethod
+    def _normalize_task_timeline(task: TaskItem, now: datetime) -> TaskItem:
+        if task.published_at is not None:
+            return task
+        if task.due_at is not None:
+            span = timedelta(days=3)
+            published_at = task.due_at - span
+            if published_at > now:
+                published_at = now
+            task.published_at = published_at
+            return task
+        task.published_at = now
+        return task
+
     async def build(self) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
         try:
             mails = await self.outlook_client.fetch_recent_messages()
         except Exception:
             mails = []
-        tasks_from_mail = [task for mail in mails for task in self._tasks_from_mail(mail, now)]
+        tasks_from_mail: list[TaskItem] = []
+        due_map: dict[int, datetime | None] = {idx: None for idx, _ in enumerate(mails)}
+        if self.mail_action_extractor is not None:
+            scan = await self.mail_action_extractor.extract(mails, now)
+            tasks_from_mail = scan.tasks
+            due_map = scan.due_map
 
         canvas_tasks: list[TaskItem] = []
         try:
@@ -341,9 +363,8 @@ class DigestService:
 
         tasks = self._merge_tasks(tasks_from_mail, canvas_tasks)
 
-        due_tasks = [t for t in tasks if self._is_due_soon(t, now)]
+        due_tasks = [self._normalize_task_timeline(t, now) for t in tasks if self._is_due_soon(t, now)]
         important_mails = [m for m in mails if self._is_mail_important(m)]
-        due_map = {idx: self._mail_due_from_content(mail, now) for idx, mail in enumerate(mails)}
         if self.mail_classifier is None:
             mails_immediate: list[MailItem] = []
             mails_weekly: list[MailItem] = []
@@ -360,10 +381,7 @@ class DigestService:
         mails_weekly.sort(key=lambda x: x.received_at, reverse=True)
         mails_reference.sort(key=lambda x: x.received_at, reverse=True)
 
-        summary = (
-            f"今天有 {len(due_tasks)} 个待办（邮件解析+Canvas可选），"
-            f"{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
-        )
+        summary = f"今天有 {len(due_tasks)} 个行动任务（Submit/Register/Verify），{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
 
         resolved_style = self._resolve_push_style(due_tasks, now)
         digest = DailyDigest(
@@ -434,7 +452,11 @@ class DigestService:
         hours_left = max(0, int((due_local - now).total_seconds() // 3600))
         title = top.title
 
+        if hours_left <= 6 and style == "学姐风":
+            return f"这是最后的通牒：距离 {title} 截止只剩约 {hours_left} 小时。现在立刻上传并二次核验提交记录（{due_local.strftime('%m-%d %H:%M')} 截止）。"
         if style == "可爱风":
+            if hours_left <= 6:
+                return f"红色警报啦：{title} 只剩约 {hours_left} 小时，先把可提交版本上传，提交后记得回看一次（{due_local.strftime('%m-%d %H:%M')} 截止）。"
             return (
                 f"小提醒来啦：{title} 还剩约 {hours_left} 小时，"
                 f"目标先定成 25 分钟冲一段，今天的你会感谢现在的自己。截止参考 {due_local.strftime('%m-%d %H:%M')}。"

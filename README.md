@@ -2,8 +2,8 @@
 
 一个个人智能 agent 原型：
 - 每天固定时间抓取 Outlook 学校邮箱并识别重要信息
-- 使用 LLM（可选）将邮件分为：立刻处理 / 本周待办 / 信息参考
-- 从 Canvas 通知邮件中提取作业/截止时间（主来源）
+- 使用 LLM 将邮件分为：立刻处理 / 本周待办 / 信息参考
+- 使用 LLM 全文扫描邮件，仅提取需要 Submit/Register/Verify 的行动任务
 - Canvas API 为可选增强（可不配置）
 - 生成每日摘要并推送到 iPhone（Pushover）
 - Outlook 使用 Delegated OAuth 登录，无需申请 Application Mail.Read 管理员审批
@@ -33,7 +33,7 @@ uvicorn app.main:app --reload --port 8000
 
 可选说明：
 - 如果 `CANVAS_TOKEN` 留空，系统会自动跳过 Canvas API，不会报错。
-- 此时任务主要来自 Outlook 里 Canvas 通知邮件解析。
+- 此时任务主要来自 Canvas API。
 
 ### Outlook (Microsoft Graph, Delegated)
 1. 在 Azure Portal 注册应用
@@ -68,8 +68,8 @@ uvicorn app.main:app --reload --port 8000
 - `TASK_NOISE_KEYWORDS` 过滤噪音通知（如 Assignment Graded）
 - `TASK_REQUIRE_DUE=true` 左栏仅展示带截止日期的任务
 - `PUSH_DUE_WITHIN_HOURS=48` 仅推送 48 小时内截止任务
-- `PUSH_NUDGE_STYLE=学姐风` 到期任务推送风格（可改为 `可爱风`）
-- `LLM_API_KEY` + `LLM_MODEL` 启用邮件三分类（未配置时自动回退规则分类）
+- `PUSH_PERSONA=auto` 到期任务推送风格（`auto/senior/cute`）
+- `LLM_API_KEY` + `LLM_MODEL` 启用邮件三分类与全文行动任务抽取（未配置时不从邮件生成待办任务）
 
 ## 4. Web 页面功能
 
@@ -77,7 +77,9 @@ uvicorn app.main:app --reload --port 8000
 - `断开 Outlook`: 删除本地 token，重新授权
 - `刷新摘要`: 读取并展示当天数据
 - `立即执行并推送`: 立即拉取 Outlook（和可选 Canvas）并发 iPhone 推送
-- 页面将按「立刻处理 / 本周待办 / 信息参考」展示邮件分诊结果，并显示到期任务催办文案
+- 页面将按「立刻处理 / 本周待办 / 信息参考」展示邮件分诊结果
+- 待办任务列表含 DDL 进度条，公式为 `(当前时间-发布时间)/(截止时间-发布时间)`
+- 距离 DDL <= 6 小时时进度条强制红色 `#FF0000` 并显示呼吸灯
 
 ## 5. 后续升级建议
 

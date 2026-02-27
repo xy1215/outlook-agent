@@ -3,6 +3,7 @@ import asyncio
 
 from app.models import DailyDigest, MailItem, TaskItem
 from app.services.digest_service import DigestService
+from app.services.mail_action_extractor import MailActionExtractor
 from app.services.mail_classifier import MailClassifier
 
 
@@ -306,3 +307,42 @@ def test_next_due_hint_includes_nearest_deadline():
     hint = service._build_next_due_hint(tasks, now)
     assert "Nearest task" in hint
     assert "最近截止" in hint
+
+
+def test_mail_action_extractor_without_llm_returns_no_tasks():
+    extractor = MailActionExtractor(
+        timezone_name="America/Los_Angeles",
+        llm_api_key="",
+        llm_model="",
+    )
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mails = [
+        MailItem(
+            subject="Recent Canvas Notifications",
+            sender="notifications@instructure.com",
+            received_at=now,
+            preview="Announcement posted.",
+            body_text="No action needed.",
+        )
+    ]
+    scan = asyncio.run(extractor.extract(mails, now))
+    assert scan.tasks == []
+    assert scan.due_map == {0: None}
+
+
+def test_senior_nudge_becomes_strict_in_last_six_hours():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    text = service._build_persona_nudge(
+        [
+            TaskItem(
+                source="outlook_llm_action",
+                title="STAT 311 作业",
+                due_at=datetime(2026, 2, 25, 14, 0, tzinfo=timezone.utc),
+            )
+        ],
+        now,
+        "学姐风",
+    )
+    assert "最后的通牒" in text
+    assert "STAT 311 作业" in text
