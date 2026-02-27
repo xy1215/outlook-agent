@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timezone
 
 from app.models import DailyDigest, MailItem, TaskItem
@@ -11,17 +10,14 @@ class DummyCanvasClient:
 
 
 class DummyOutlookClient:
-    def __init__(self, mails=None):
-        self.mails = mails or []
-
     async def fetch_recent_messages(self, max_count: int = 20):
-        return self.mails
+        return []
 
 
-def make_service(outlook_client=None, push_tone="学姐风") -> DigestService:
+def make_service() -> DigestService:
     return DigestService(
         canvas_client=DummyCanvasClient(),
-        outlook_client=outlook_client or DummyOutlookClient(),
+        outlook_client=DummyOutlookClient(),
         timezone_name="America/Los_Angeles",
         lookahead_days=7,
         important_keywords="urgent,important,deadline,exam,quiz,project",
@@ -30,11 +26,9 @@ def make_service(outlook_client=None, push_tone="学姐风") -> DigestService:
         task_noise_keywords="assignment graded,graded:,office hours moved,daily digest,announcement posted",
         task_require_due=True,
         push_due_within_hours=48,
-        push_tone=push_tone,
-        llm_enabled=False,
+        push_nudge_style="学姐风",
         llm_api_key="",
-        llm_base_url="https://api.openai.com/v1",
-        llm_model="gpt-4o-mini",
+        llm_model="",
     )
 
 
@@ -146,8 +140,21 @@ def test_push_text_only_includes_due_tasks_within_window():
     assert "Near due" in text
     assert "Far due" not in text
     assert "No due" not in text
-    assert "[推送] 风格 学姐风" in text
-    assert digest.push_urgency in {"high", "medium", "critical"}
+
+
+def test_push_text_includes_due_nudge_message():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    digest = DailyDigest(
+        generated_at=now,
+        date_label="2026-02-25",
+        tasks=[],
+        important_mails=[],
+        summary_text="s",
+        due_push_message="学姐提醒：今天先做最难的一题。",
+    )
+    text = service.to_push_text(digest)
+    assert "学姐提醒" in text
 
 
 def test_requires_due_filters_mail_without_deadline():
@@ -190,62 +197,37 @@ def test_extracts_multiple_tasks_from_body_due_blocks():
     assert any("Chapter 5 Quiz" in t for t in titles)
 
 
-def test_build_generates_mail_buckets():
+def test_rule_based_mail_triage_three_buckets():
+    service = make_service()
     now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
-    mails = [
-        MailItem(
-            subject="Assignment: HW 4 due 2026-02-26 23:59",
-            sender="notifications@instructure.com",
-            received_at=now,
-            preview="Please submit before deadline.",
-            is_important=False,
-            url=None,
-        ),
-        MailItem(
-            subject="Weekly campus newsletter",
-            sender="news@school.edu",
-            received_at=now,
-            preview="Events and highlights this week.",
-            is_important=False,
-            url=None,
-        ),
-    ]
-    service = make_service(outlook_client=DummyOutlookClient(mails=mails))
-    digest = asyncio.run(service.build())
-    assert len(digest.mail_buckets.immediate_action) == 1
-    assert digest.mail_buckets.immediate_action[0].subject.startswith("Assignment")
-    assert len(digest.mail_buckets.info_reference) == 1
-
-
-def test_push_text_uses_cute_tone():
-    service = make_service(push_tone="可爱风")
-    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
-    digest = DailyDigest(
-        generated_at=now,
-        date_label="2026-02-25",
-        tasks=[
-            TaskItem(source="outlook_canvas_mail", title="Near due", due_at=datetime(2026, 2, 25, 12, 0, tzinfo=timezone.utc)),
-        ],
-        important_mails=[],
-        summary_text="s",
+    immediate_mail = MailItem(
+        subject="URGENT: Project deadline tonight",
+        sender="prof@school.edu",
+        received_at=now,
+        preview="Please submit by tonight.",
+        is_important=True,
+        url=None,
     )
-    text = service.to_push_text(digest)
-    assert "可爱" in text
-    assert digest.push_tone == "可爱风"
-
-
-def test_push_text_uses_senior_style_urge_for_critical_deadline():
-    service = make_service(push_tone="学姐风")
-    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
-    digest = DailyDigest(
-        generated_at=now,
-        date_label="2026-02-25",
-        tasks=[
-            TaskItem(source="outlook_canvas_mail", title="Final Report", due_at=datetime(2026, 2, 25, 12, 0, tzinfo=timezone.utc)),
-        ],
-        important_mails=[],
-        summary_text="s",
+    week_mail = MailItem(
+        subject="Canvas reminder for next week quiz",
+        sender="notifications@instructure.com",
+        received_at=now,
+        preview="Quiz due on 2026-03-01 23:59",
+        is_important=False,
+        url=None,
     )
-    text = service.to_push_text(digest)
-    assert "学姐催办" in text
-    assert digest.push_urgency == "critical"
+    ref_mail = MailItem(
+        subject="Campus newsletter",
+        sender="news@school.edu",
+        received_at=now,
+        preview="Events this month.",
+        is_important=False,
+        url=None,
+    )
+
+    b1 = service._rule_based_bucket(immediate_mail, now.astimezone(), [])
+    b2 = service._rule_based_bucket(week_mail, now.astimezone(), [])
+    b3 = service._rule_based_bucket(ref_mail, now.astimezone(), [])
+    assert b1 == "立刻处理"
+    assert b2 == "本周待办"
+    assert b3 == "信息参考"

@@ -13,7 +13,6 @@ from app.models import DailyDigest
 from app.scheduler import create_scheduler, daily_trigger
 from app.services.canvas_client import CanvasClient
 from app.services.digest_service import DigestService
-from app.services.llm_client import LLMTaskExtractor
 from app.services.notifier import Notifier
 from app.services.outlook_client import OutlookClient
 
@@ -29,15 +28,8 @@ outlook_client = OutlookClient(
     settings.ms_user_email,
     settings.ms_redirect_uri,
     settings.ms_token_store_path,
-    settings.ms_mail_cache_ttl_sec,
 )
 notifier = Notifier(settings.push_provider, settings.pushover_app_token, settings.pushover_user_key)
-llm_task_extractor = LLMTaskExtractor(
-    settings.llm_provider,
-    settings.llm_api_key,
-    settings.llm_model,
-    settings.llm_timeout_sec,
-)
 digest_service = DigestService(
     canvas_client,
     outlook_client,
@@ -49,12 +41,9 @@ digest_service = DigestService(
     settings.task_noise_keywords,
     settings.task_require_due,
     settings.push_due_within_hours,
-    settings.push_tone,
-    settings.llm_enabled,
-    settings.llm_max_mails,
-    llm_task_extractor,
-    settings.llm_api_key,
+    settings.push_nudge_style,
     settings.llm_base_url,
+    settings.llm_api_key,
     settings.llm_model,
 )
 scheduler = create_scheduler(settings.timezone)

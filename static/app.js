@@ -23,22 +23,29 @@ async function loadAuthStatus() {
   }
 }
 
+function renderMails(listElementId, mails, emptyText) {
+  const mailList = document.getElementById(listElementId);
+  mailList.innerHTML = '';
+  if (!mails || !mails.length) {
+    const li = document.createElement('li');
+    li.textContent = emptyText;
+    mailList.appendChild(li);
+    return;
+  }
+
+  mails.forEach((mail) => {
+    const li = document.createElement('li');
+    li.innerHTML = `${mail.subject} - ${mail.sender} ${mail.url ? `<a href="${mail.url}" target="_blank">打开</a>` : ''}`;
+    mailList.appendChild(li);
+  });
+}
+
 async function loadDigest() {
   const res = await fetch('/api/today');
   const data = await res.json();
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
-  const urgencyMap = {
-    none: '无紧急任务',
-    low: '低',
-    medium: '一般',
-    high: '较紧急',
-    critical: '紧急',
-  };
-  const tone = data.push_tone || '学姐风';
-  const urgency = urgencyMap[data.push_urgency] || '一般';
-  document.getElementById('pushMeta').textContent = `推送风格: ${tone} | 截止紧急度: ${urgency}`;
-  document.getElementById('pushPreview').textContent = data.push_preview || '暂无推送预览';
+  document.getElementById('pushMessage').textContent = data.due_push_message || '暂无 48 小时内到期催办文案';
 
   const tasks = document.getElementById('tasks');
   tasks.innerHTML = '';
@@ -50,31 +57,15 @@ async function loadDigest() {
     data.tasks.forEach((task) => {
       const li = document.createElement('li');
       const due = task.due_at ? new Date(task.due_at).toLocaleString() : '待定';
-      const src = task.source === 'llm_mail_extract' ? '[LLM]' : '[规则]';
-      li.innerHTML = `<strong>${due}</strong> ${src} | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}`;
+      li.innerHTML = `<strong>${due}</strong> | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}`;
       tasks.appendChild(li);
     });
   }
 
-  renderMailBucket('mailImmediate', data.mail_buckets?.immediate_action || [], '暂无立刻处理邮件');
-  renderMailBucket('mailWeek', data.mail_buckets?.week_todo || [], '暂无本周待办邮件');
-  renderMailBucket('mailInfo', data.mail_buckets?.info_reference || [], '暂无信息参考邮件');
-}
-
-function renderMailBucket(elementId, mails, emptyText) {
-  const el = document.getElementById(elementId);
-  el.innerHTML = '';
-  if (!mails.length) {
-    const li = document.createElement('li');
-    li.textContent = emptyText;
-    el.appendChild(li);
-    return;
-  }
-  mails.forEach((mail) => {
-    const li = document.createElement('li');
-    li.innerHTML = `${mail.subject} - ${mail.sender} ${mail.url ? `<a href="${mail.url}" target="_blank">打开</a>` : ''}`;
-    el.appendChild(li);
-  });
+  const triage = data.mail_triage || {};
+  renderMails('mailsNow', triage['立刻处理'] || [], '暂无需要立刻处理邮件');
+  renderMails('mailsWeek', triage['本周待办'] || [], '暂无本周待办邮件');
+  renderMails('mailsRef', triage['信息参考'] || [], '暂无信息参考邮件');
 }
 
 async function runNow() {

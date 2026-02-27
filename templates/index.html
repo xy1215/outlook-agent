@@ -24,8 +24,7 @@
       <section class="card">
         <h2>今日摘要</h2>
         <p id="summary">加载中...</p>
-        <p id="pushMeta" class="push-meta">推送策略加载中...</p>
-        <pre id="pushPreview" class="push-preview">推送预览加载中...</pre>
+        <p id="pushMessage">催办文案加载中...</p>
       </section>
 
       <section class="grid">
@@ -34,21 +33,16 @@
           <ul id="tasks"></ul>
         </article>
         <article class="card">
-          <h3>邮件分拣（LLM）</h3>
-          <div class="mail-columns">
-            <section>
-              <h4>立刻处理</h4>
-              <ul id="mailImmediate"></ul>
-            </section>
-            <section>
-              <h4>本周待办</h4>
-              <ul id="mailWeek"></ul>
-            </section>
-            <section>
-              <h4>信息参考</h4>
-              <ul id="mailInfo"></ul>
-            </section>
-          </div>
+          <h3>立刻处理</h3>
+          <ul id="mailsNow"></ul>
+        </article>
+        <article class="card">
+          <h3>本周待办</h3>
+          <ul id="mailsWeek"></ul>
+        </article>
+        <article class="card">
+          <h3>信息参考</h3>
+          <ul id="mailsRef"></ul>
         </article>
       </section>
     </main>
