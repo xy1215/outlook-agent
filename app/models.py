@@ -33,4 +33,5 @@ class DailyDigest(BaseModel):
     important_mails: list[MailItem]
     summary_text: str
     mail_triage: dict[str, list[MailItem]] = Field(default_factory=dict)
+    due_push_style: str = ""
     due_push_message: str = ""

@@ -14,7 +14,7 @@ class DummyOutlookClient:
         return []
 
 
-def make_service() -> DigestService:
+def make_service(push_nudge_style: str = "学姐风") -> DigestService:
     return DigestService(
         canvas_client=DummyCanvasClient(),
         outlook_client=DummyOutlookClient(),
@@ -26,7 +26,7 @@ def make_service() -> DigestService:
         task_noise_keywords="assignment graded,graded:,office hours moved,daily digest,announcement posted",
         task_require_due=True,
         push_due_within_hours=48,
-        push_nudge_style="学姐风",
+        push_nudge_style=push_nudge_style,
         llm_api_key="",
         llm_model="",
     )
@@ -155,6 +155,53 @@ def test_push_text_includes_due_nudge_message():
     )
     text = service.to_push_text(digest)
     assert "学姐提醒" in text
+
+
+def test_push_text_includes_due_nudge_style_label():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    digest = DailyDigest(
+        generated_at=now,
+        date_label="2026-02-25",
+        tasks=[],
+        important_mails=[],
+        summary_text="s",
+        due_push_style="可爱风",
+        due_push_message="叮咚！你今天也可以稳稳完成任务~",
+    )
+    text = service.to_push_text(digest)
+    assert "[催办风格] 可爱风" in text
+
+
+def test_auto_nudge_style_prefers_cute_when_not_urgent():
+    service = make_service(push_nudge_style="auto")
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    due_tasks = [
+        TaskItem(
+            source="outlook_canvas_mail",
+            title="Project draft",
+            due_at=datetime(2026, 2, 27, 12, 0, tzinfo=timezone.utc),
+        )
+    ]
+
+    style, _ = service._build_due_nudge(due_tasks, now)
+    assert style == "可爱风"
+
+
+def test_auto_nudge_style_prefers_senior_when_urgent():
+    service = make_service(push_nudge_style="auto")
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    due_tasks = [
+        TaskItem(
+            source="outlook_canvas_mail",
+            title="Quiz retake",
+            due_at=datetime(2026, 2, 25, 13, 0, tzinfo=timezone.utc),
+        )
+    ]
+
+    style, text = service._build_due_nudge(due_tasks, now)
+    assert style == "学姐风"
+    assert "学姐" in text
 
 
 def test_requires_due_filters_mail_without_deadline():

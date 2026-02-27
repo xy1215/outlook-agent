@@ -45,6 +45,7 @@ async function loadDigest() {
   const data = await res.json();
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
+  document.getElementById('pushStyle').textContent = `催办风格: ${data.due_push_style || '学姐风'}`;
   document.getElementById('pushMessage').textContent = data.due_push_message || '暂无 48 小时内到期催办文案';
 
   const tasks = document.getElementById('tasks');

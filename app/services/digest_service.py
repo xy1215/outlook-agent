@@ -47,6 +47,7 @@ class DigestService:
         self.llm_model = llm_model.strip()
 
         self.mail_buckets = ("立刻处理", "本周待办", "信息参考")
+        self.nudge_styles = ("学姐风", "可爱风")
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -446,7 +447,30 @@ class DigestService:
             triage[bucket].sort(key=lambda m: m.received_at, reverse=True)
         return triage
 
-    def _build_due_nudge(self, due_tasks: list[TaskItem], now: datetime) -> str:
+    def _pick_nudge_style(self, due_tasks: list[TaskItem], now: datetime) -> str:
+        configured = self.push_nudge_style.strip()
+        if configured in self.nudge_styles:
+            return configured
+        if configured and configured not in {"auto", "学姐风/可爱风", "可爱风/学姐风"}:
+            return "学姐风"
+
+        earliest_due: datetime | None = None
+        for task in due_tasks:
+            if task.due_at is None:
+                continue
+            due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
+            if earliest_due is None or due_local < earliest_due:
+                earliest_due = due_local
+
+        if earliest_due is None:
+            return "学姐风"
+
+        hours_left = int((earliest_due - now).total_seconds() // 3600)
+        if hours_left <= 12:
+            return "学姐风"
+        return "可爱风"
+
+    def _build_due_nudge(self, due_tasks: list[TaskItem], now: datetime) -> tuple[str, str]:
         due_limit = now + timedelta(hours=self.push_due_within_hours)
         candidates: list[tuple[datetime, TaskItem]] = []
         overdue: list[tuple[datetime, TaskItem]] = []
@@ -460,16 +484,16 @@ class DigestService:
             elif due_local <= due_limit:
                 candidates.append((due_local, task))
 
-        style = self.push_nudge_style
+        style = self._pick_nudge_style(due_tasks, now)
         if overdue:
             due_local, task = sorted(overdue, key=lambda x: x[0])[0]
             due_text = due_local.strftime("%m-%d %H:%M")
             if "可爱" in style:
-                return f"小提醒！{task.title} 在 {due_text} 就到点了（甚至超时啦），现在冲还能补救~"
-            return f"学姐催一下：{task.title} 在 {due_text} 已到期，先交可完成部分，马上补齐。"
+                return style, f"小提醒！{task.title} 在 {due_text} 就到点了（甚至超时啦），现在冲还能补救~"
+            return style, f"学姐催一下：{task.title} 在 {due_text} 已到期，先交可完成部分，马上补齐。"
 
         if not candidates:
-            return ""
+            return style, ""
 
         due_local, task = sorted(candidates, key=lambda x: x[0])[0]
         due_text = due_local.strftime("%m-%d %H:%M")
@@ -477,12 +501,12 @@ class DigestService:
 
         if "可爱" in style:
             if hours_left <= 8:
-                return f"叮咚！{task.title} 还剩约 {hours_left} 小时（{due_text} 截止），现在开始刚刚好。"
-            return f"今天的重点任务是 {task.title}，{due_text} 前提交就稳啦，冲呀~"
+                return style, f"叮咚！{task.title} 还剩约 {hours_left} 小时（{due_text} 截止），现在开始刚刚好。"
+            return style, f"今天的重点任务是 {task.title}，{due_text} 前提交就稳啦，冲呀~"
 
         if hours_left <= 8:
-            return f"学姐提醒：{task.title} 距离截止只剩约 {hours_left} 小时（{due_text}），先把最关键部分提交。"
-        return f"学姐建议：优先完成 {task.title}，截止时间 {due_text}，你按节奏推进就能稳住。"
+            return style, f"学姐提醒：{task.title} 距离截止只剩约 {hours_left} 小时（{due_text}），先把最关键部分提交。"
+        return style, f"学姐建议：优先完成 {task.title}，截止时间 {due_text}，你按节奏推进就能稳住。"
 
     async def build(self) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
@@ -522,6 +546,8 @@ class DigestService:
             f"本周待办 {len(triage['本周待办'])}，信息参考 {len(triage['信息参考'])}。"
         )
 
+        due_push_style, due_push_message = self._build_due_nudge(due_tasks, now)
+
         return DailyDigest(
             generated_at=now,
             date_label=now.strftime("%Y-%m-%d"),
@@ -529,7 +555,8 @@ class DigestService:
             important_mails=important_mails,
             summary_text=summary,
             mail_triage=triage,
-            due_push_message=self._build_due_nudge(due_tasks, now),
+            due_push_style=due_push_style,
+            due_push_message=due_push_message,
         )
 
     def to_push_text(self, digest: DailyDigest) -> str:
@@ -546,6 +573,8 @@ class DigestService:
 
         lines = [digest.summary_text]
         if digest.due_push_message:
+            if digest.due_push_style:
+                lines.append(f"[催办风格] {digest.due_push_style}")
             lines.append(digest.due_push_message)
 
         for task in push_tasks[:5]:
