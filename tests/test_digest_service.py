@@ -343,6 +343,20 @@ def test_mail_action_extractor_without_llm_returns_no_tasks():
     assert scan.due_map == {0: None}
 
 
+def test_mail_action_extractor_sender_trust_rules():
+    extractor = MailActionExtractor(
+        timezone_name="America/Los_Angeles",
+        llm_api_key="k",
+        llm_model="m",
+        trusted_sender_domains=".edu,instructure.com",
+        blocked_sender_keywords="lease,apartment,promo",
+    )
+    assert extractor._is_trusted_sender("Notifications <notifications@instructure.com>")
+    assert extractor._is_trusted_sender("dean-office@wisc.edu")
+    assert not extractor._is_trusted_sender("Housing Deals <promotions@apartments.com>")
+    assert not extractor._is_trusted_sender("leases@wisc.edu")
+
+
 def test_senior_nudge_becomes_strict_in_last_six_hours():
     service = make_service()
     now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)

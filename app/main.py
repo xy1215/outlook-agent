@@ -47,6 +47,8 @@ mail_action_extractor = MailActionExtractor(
     llm_model=settings.llm_model,
     llm_timeout_sec=settings.llm_timeout_sec,
     llm_max_parallel=settings.llm_max_parallel,
+    trusted_sender_domains=settings.llm_trusted_sender_domains,
+    blocked_sender_keywords=settings.llm_blocked_sender_keywords,
 )
 digest_service = DigestService(
     canvas_client,

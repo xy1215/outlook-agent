@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import re
 
 import httpx
 
@@ -25,6 +26,8 @@ class MailActionExtractor:
         llm_model: str = "",
         llm_timeout_sec: int = 12,
         llm_max_parallel: int = 6,
+        trusted_sender_domains: str = ".edu,instructure.com,canvaslms.com",
+        blocked_sender_keywords: str = "apartment,lease,housing,realtor,zillow,marketing,promo,discount,coupon,ad",
     ) -> None:
         self.timezone_name = timezone_name
         self.llm_api_base = llm_api_base.rstrip("/")
@@ -32,6 +35,37 @@ class MailActionExtractor:
         self.llm_model = llm_model.strip()
         self.llm_timeout_sec = max(3, llm_timeout_sec)
         self.llm_max_parallel = max(1, llm_max_parallel)
+        self.trusted_sender_domains = [x.strip().lower() for x in trusted_sender_domains.split(",") if x.strip()]
+        self.blocked_sender_keywords = [x.strip().lower() for x in blocked_sender_keywords.split(",") if x.strip()]
+
+    @staticmethod
+    def _extract_sender_email(sender: str) -> str:
+        text = (sender or "").strip().lower()
+        if not text:
+            return ""
+        match = re.search(r"<([^>]+)>", text)
+        if match:
+            return match.group(1).strip()
+        if "@" in text and " " not in text:
+            return text
+        inline = re.search(r"([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})", text)
+        return inline.group(1) if inline else text
+
+    def _is_trusted_sender(self, sender: str) -> bool:
+        sender_l = (sender or "").strip().lower()
+        if not sender_l:
+            return False
+        if any(keyword in sender_l for keyword in self.blocked_sender_keywords):
+            return False
+        email = self._extract_sender_email(sender_l)
+        domain = email.split("@", 1)[1] if "@" in email else ""
+        for marker in self.trusted_sender_domains:
+            if marker.startswith("."):
+                if domain.endswith(marker):
+                    return True
+            elif domain == marker or domain.endswith(f".{marker}"):
+                return True
+        return False
 
     @staticmethod
     def _parse_dt(value: str | None) -> datetime | None:
@@ -136,6 +170,10 @@ class MailActionExtractor:
         sem = asyncio.Semaphore(self.llm_max_parallel)
 
         async def scan_one(idx: int, mail: MailItem) -> None:
+            if not self._is_trusted_sender(mail.sender):
+                async with lock:
+                    due_map[idx] = None
+                return
             async with sem:
                 extracted, best_due = await self._llm_extract_one(mail, now)
             async with lock:

@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="", alias="LLM_MODEL")
     llm_timeout_sec: int = Field(default=12, alias="LLM_TIMEOUT_SEC")
     llm_max_parallel: int = Field(default=6, alias="LLM_MAX_PARALLEL")
+    llm_trusted_sender_domains: str = Field(default=".edu,instructure.com,canvaslms.com", alias="LLM_TRUSTED_SENDER_DOMAINS")
+    llm_blocked_sender_keywords: str = Field(
+        default="apartment,lease,housing,realtor,zillow,marketing,promo,discount,coupon,ad",
+        alias="LLM_BLOCKED_SENDER_KEYWORDS",
+    )
 
 
 settings = Settings()
