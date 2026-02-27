@@ -28,6 +28,11 @@ async function loadDigest() {
   const data = await res.json();
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
+  document.getElementById('triageSummary').textContent =
+    `邮件分类统计：立刻处理 ${ (data.mails_immediate || []).length } 封，` +
+    `本周待办 ${ (data.mails_weekly || []).length } 封，` +
+    `信息参考 ${ (data.mails_reference || []).length } 封`;
+  document.getElementById('pushStyle').textContent = `催办风格：${data.due_push_style || '未设置'}`;
   document.getElementById('pushPreview').textContent = data.push_preview || '暂无推送预览';
 
   const tasks = document.getElementById('tasks');

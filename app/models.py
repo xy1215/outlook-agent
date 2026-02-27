@@ -24,6 +24,7 @@ class MailItem(BaseModel):
     body_text: str = ""
     is_important: bool = False
     url: Optional[str] = None
+    category: str = ""
 
 
 class DailyDigest(BaseModel):
@@ -36,3 +37,4 @@ class DailyDigest(BaseModel):
     mails_weekly: list[MailItem] = Field(default_factory=list)
     mails_reference: list[MailItem] = Field(default_factory=list)
     push_preview: str = ""
+    due_push_style: str = ""

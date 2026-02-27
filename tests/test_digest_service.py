@@ -217,6 +217,9 @@ def test_mail_classifier_fallback_buckets():
     assert len(buckets.immediate) == 1
     assert len(buckets.weekly) == 1
     assert len(buckets.reference) == 1
+    assert buckets.immediate[0].category == "立刻处理"
+    assert buckets.weekly[0].category == "本周待办"
+    assert buckets.reference[0].category == "信息参考"
 
 
 def test_push_text_contains_persona_nudge():
@@ -242,4 +245,31 @@ def test_push_text_contains_persona_nudge():
         mails_reference=[],
     )
     text = service.to_push_text(digest)
+    assert "[催办风格] 学姐风" in text
     assert "学姐催一下" in text
+
+
+def test_resolve_push_style_for_auto_persona():
+    service = DigestService(
+        canvas_client=DummyCanvasClient(),
+        outlook_client=DummyOutlookClient(),
+        timezone_name="America/Los_Angeles",
+        lookahead_days=7,
+        important_keywords="urgent,important,deadline,exam,quiz,project",
+        push_persona="auto",
+    )
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    digest = DailyDigest(
+        generated_at=now,
+        date_label="2026-02-25",
+        tasks=[
+            TaskItem(source="outlook_canvas_mail", title="Soon due", due_at=datetime(2026, 2, 25, 16, 0, tzinfo=timezone.utc)),
+        ],
+        important_mails=[],
+        summary_text="s",
+        mails_immediate=[],
+        mails_weekly=[],
+        mails_reference=[],
+    )
+    digest.due_push_style = service._resolve_push_style(digest.tasks, now)
+    assert digest.due_push_style == "学姐风"

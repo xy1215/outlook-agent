@@ -375,10 +375,35 @@ class DigestService:
             mails_weekly=mails_weekly,
             mails_reference=mails_reference,
         )
+        digest.due_push_style = self._resolve_push_style(digest.tasks, now)
         digest.push_preview = self.to_push_text(digest)
         return digest
 
-    def _build_persona_nudge(self, push_tasks: list[TaskItem], now: datetime) -> str:
+    def _resolve_push_style(self, tasks: list[TaskItem], now: datetime) -> str:
+        if self.push_persona == "cute":
+            return "可爱风"
+        if self.push_persona == "senior":
+            return "学姐风"
+        due_limit = now + timedelta(hours=self.push_due_within_hours)
+        due_floor = now - timedelta(hours=24)
+        due_tasks = []
+        for task in tasks:
+            if task.due_at is None:
+                continue
+            due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
+            if due_floor <= due_local <= due_limit:
+                due_tasks.append(task)
+        if not due_tasks:
+            return "可爱风"
+        due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=ZoneInfo(self.timezone_name)))
+        top = due_tasks[0]
+        if top.due_at is None:
+            return "可爱风"
+        due_local = top.due_at.astimezone(ZoneInfo(self.timezone_name))
+        hours_left = max(0, int((due_local - now).total_seconds() // 3600))
+        return "学姐风" if hours_left <= 18 else "可爱风"
+
+    def _build_persona_nudge(self, push_tasks: list[TaskItem], now: datetime, style: str) -> str:
         if not push_tasks:
             return "今天没有 48 小时内到期任务，节奏很稳，继续保持。"
         top = push_tasks[0]
@@ -388,11 +413,7 @@ class DigestService:
         hours_left = max(0, int((due_local - now).total_seconds() // 3600))
         title = top.title
 
-        persona = self.push_persona
-        if persona == "auto":
-            persona = "senior" if hours_left <= 18 else "cute"
-
-        if persona == "cute":
+        if style == "可爱风":
             return (
                 f"小提醒来啦：{title} 还剩约 {hours_left} 小时，"
                 "先把最难的一小段做完就已经赢一半啦，冲冲冲。"
@@ -414,7 +435,8 @@ class DigestService:
             if due_floor <= due_local <= due_limit:
                 push_tasks.append(task)
 
-        lines = [digest.summary_text, self._build_persona_nudge(push_tasks, now)]
+        style = digest.due_push_style or self._resolve_push_style(digest.tasks, now)
+        lines = [digest.summary_text, f"[催办风格] {style}", self._build_persona_nudge(push_tasks, now, style)]
         for task in push_tasks[:5]:
             due = task.due_at.strftime("%m-%d %H:%M") if task.due_at else "无截止时间"
             lines.append(f"[任务] {task.title} | {due}")

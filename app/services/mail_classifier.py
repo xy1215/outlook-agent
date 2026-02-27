@@ -59,6 +59,7 @@ class MailClassifier:
             "now": now.isoformat(),
             "subject": mail.subject,
             "preview": mail.preview,
+            "body_text": mail.body_text[:1200],
             "sender": mail.sender,
             "due_at": due_text,
         }
@@ -97,10 +98,13 @@ class MailClassifier:
                 label = self._fallback_bucket(mail, due_at, now)
 
             if label == "immediate":
+                mail.category = "立刻处理"
                 immediate.append(mail)
             elif label == "weekly":
+                mail.category = "本周待办"
                 weekly.append(mail)
             else:
+                mail.category = "信息参考"
                 reference.append(mail)
 
         return MailBuckets(immediate=immediate, weekly=weekly, reference=reference)
