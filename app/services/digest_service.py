@@ -376,6 +376,7 @@ class DigestService:
             mails_weekly=mails_weekly,
             mails_reference=mails_reference,
             due_push_style=resolved_style,
+            next_due_hint=self._build_next_due_hint(due_tasks, now),
         )
         digest.push_preview_senior = self._to_push_text_with_style(digest, "学姐风")
         digest.push_preview_cute = self._to_push_text_with_style(digest, "可爱风")
@@ -406,6 +407,23 @@ class DigestService:
         hours_left = max(0, int((due_local - now).total_seconds() // 3600))
         return "学姐风" if hours_left <= 18 else "可爱风"
 
+    def _build_next_due_hint(self, tasks: list[TaskItem], now: datetime) -> str:
+        due_tasks = [task for task in tasks if task.due_at is not None]
+        if not due_tasks:
+            return "最近 48 小时没有硬截止，按计划推进就好。"
+        due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=ZoneInfo(self.timezone_name)))
+        top = due_tasks[0]
+        if top.due_at is None:
+            return "最近 48 小时没有硬截止，按计划推进就好。"
+        due_local = top.due_at.astimezone(ZoneInfo(self.timezone_name))
+        hours_left = int((due_local - now).total_seconds() // 3600)
+        due_label = due_local.strftime("%m-%d %H:%M")
+        if hours_left < 0:
+            return f"最近截止：{top.title}（{due_label}）已过期，优先补交并给老师留说明。"
+        if hours_left <= 6:
+            return f"最近截止：{top.title}（{due_label}），仅剩约 {hours_left} 小时，马上冲刺提交。"
+        return f"最近截止：{top.title}（{due_label}），还剩约 {hours_left} 小时，建议今天先完成主干。"
+
     def _build_persona_nudge(self, push_tasks: list[TaskItem], now: datetime, style: str) -> str:
         if not push_tasks:
             return "今天没有 48 小时内到期任务，节奏很稳，继续保持。"
@@ -419,11 +437,11 @@ class DigestService:
         if style == "可爱风":
             return (
                 f"小提醒来啦：{title} 还剩约 {hours_left} 小时，"
-                "先把最难的一小段做完就已经赢一半啦，冲冲冲。"
+                f"目标先定成 25 分钟冲一段，今天的你会感谢现在的自己。截止参考 {due_local.strftime('%m-%d %H:%M')}。"
             )
         return (
             f"学姐催一下：{title} 距离截止约 {hours_left} 小时。"
-            "现在就开工 25 分钟，先交可提交版本，别把主动权让给ddl。"
+            f"现在就开工 25 分钟，先交可提交版本，别把主动权让给ddl（{due_local.strftime('%m-%d %H:%M')} 截止）。"
         )
 
     def _to_push_text_with_style(self, digest: DailyDigest, style: str) -> str:

@@ -38,5 +38,6 @@ class DailyDigest(BaseModel):
     mails_reference: list[MailItem] = Field(default_factory=list)
     push_preview: str = ""
     due_push_style: str = ""
+    next_due_hint: str = ""
     push_preview_senior: str = ""
     push_preview_cute: str = ""

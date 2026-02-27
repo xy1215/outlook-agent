@@ -294,3 +294,15 @@ def test_push_text_dual_style_previews():
     cute = service._to_push_text_with_style(digest, "可爱风")
     assert "[催办风格] 学姐风" in senior
     assert "[催办风格] 可爱风" in cute
+
+
+def test_next_due_hint_includes_nearest_deadline():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    tasks = [
+        TaskItem(source="outlook_canvas_mail", title="Later task", due_at=datetime(2026, 2, 26, 12, 0, tzinfo=timezone.utc)),
+        TaskItem(source="outlook_canvas_mail", title="Nearest task", due_at=datetime(2026, 2, 25, 15, 0, tzinfo=timezone.utc)),
+    ]
+    hint = service._build_next_due_hint(tasks, now)
+    assert "Nearest task" in hint
+    assert "最近截止" in hint
