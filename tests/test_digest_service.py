@@ -297,6 +297,19 @@ def test_push_text_dual_style_previews():
     assert "[催办风格] 可爱风" in cute
 
 
+def test_collect_push_task_nudges_for_two_personas():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    tasks = [
+        TaskItem(source="outlook_canvas_mail", title="Chapter quiz", due_at=datetime(2026, 2, 25, 20, 0, tzinfo=timezone.utc)),
+    ]
+    push_tasks = service._collect_push_tasks(tasks, now)
+    senior_nudge = service._build_persona_nudge(push_tasks, now, "学姐风")
+    cute_nudge = service._build_persona_nudge(push_tasks, now, "可爱风")
+    assert "Chapter quiz" in senior_nudge
+    assert "小提醒来啦" in cute_nudge
+
+
 def test_next_due_hint_includes_nearest_deadline():
     service = make_service()
     now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)

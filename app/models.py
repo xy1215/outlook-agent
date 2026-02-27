@@ -42,3 +42,6 @@ class DailyDigest(BaseModel):
     next_due_hint: str = ""
     push_preview_senior: str = ""
     push_preview_cute: str = ""
+    due_nudge_current: str = ""
+    due_nudge_senior: str = ""
+    due_nudge_cute: str = ""

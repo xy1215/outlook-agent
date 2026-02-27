@@ -384,6 +384,7 @@ class DigestService:
         summary = f"今天有 {len(due_tasks)} 个行动任务（Submit/Register/Verify），{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
 
         resolved_style = self._resolve_push_style(due_tasks, now)
+        push_tasks = self._collect_push_tasks(due_tasks, now)
         digest = DailyDigest(
             generated_at=now,
             date_label=now.strftime("%Y-%m-%d"),
@@ -395,6 +396,9 @@ class DigestService:
             mails_reference=mails_reference,
             due_push_style=resolved_style,
             next_due_hint=self._build_next_due_hint(due_tasks, now),
+            due_nudge_current=self._build_persona_nudge(push_tasks, now, resolved_style),
+            due_nudge_senior=self._build_persona_nudge(push_tasks, now, "学姐风"),
+            due_nudge_cute=self._build_persona_nudge(push_tasks, now, "可爱风"),
         )
         digest.push_preview_senior = self._to_push_text_with_style(digest, "学姐风")
         digest.push_preview_cute = self._to_push_text_with_style(digest, "可爱风")
@@ -466,18 +470,22 @@ class DigestService:
             f"现在就开工 25 分钟，先交可提交版本，别把主动权让给ddl（{due_local.strftime('%m-%d %H:%M')} 截止）。"
         )
 
-    def _to_push_text_with_style(self, digest: DailyDigest, style: str) -> str:
-        now = digest.generated_at
+    def _collect_push_tasks(self, tasks: list[TaskItem], now: datetime) -> list[TaskItem]:
         due_limit = now + timedelta(hours=self.push_due_within_hours)
         due_floor = now - timedelta(hours=24)
-        push_tasks = []
-        for task in digest.tasks:
+        push_tasks: list[TaskItem] = []
+        for task in tasks:
             if task.due_at is None:
                 continue
             due_local = task.due_at.astimezone(ZoneInfo(self.timezone_name))
             if due_floor <= due_local <= due_limit:
                 push_tasks.append(task)
+        push_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=ZoneInfo(self.timezone_name)))
+        return push_tasks
 
+    def _to_push_text_with_style(self, digest: DailyDigest, style: str) -> str:
+        now = digest.generated_at
+        push_tasks = self._collect_push_tasks(digest.tasks, now)
         lines = [digest.summary_text, f"[催办风格] {style}", self._build_persona_nudge(push_tasks, now, style)]
         for task in push_tasks[:5]:
             due = task.due_at.strftime("%m-%d %H:%M") if task.due_at else "无截止时间"

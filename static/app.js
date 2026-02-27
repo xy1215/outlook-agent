@@ -36,6 +36,9 @@ async function loadDigest() {
     `本周待办 ${ (data.mails_weekly || []).length } 封，` +
     `信息参考 ${ (data.mails_reference || []).length } 封`;
   document.getElementById('pushStyle').textContent = `催办风格：${data.due_push_style || '未设置'}`;
+  document.getElementById('dueNudgeCurrent').textContent = `当前风格文案：${data.due_nudge_current || '暂无'}`;
+  document.getElementById('dueNudgeSenior').textContent = `学姐风文案：${data.due_nudge_senior || '暂无'}`;
+  document.getElementById('dueNudgeCute').textContent = `可爱风文案：${data.due_nudge_cute || '暂无'}`;
   document.getElementById('pushPersonaHint').textContent =
     data.due_push_style
       ? `当前采用 ${data.due_push_style}，以下为本次推送实际发送内容。`
