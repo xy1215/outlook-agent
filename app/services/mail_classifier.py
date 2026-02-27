@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 
 import httpx
@@ -34,23 +34,17 @@ class MailClassifier:
         self.llm_timeout_sec = max(3, llm_timeout_sec)
         self.llm_max_parallel = max(1, llm_max_parallel)
 
-    def _fallback_bucket(self, mail: MailItem, due_at: datetime | None, now: datetime) -> str:
+    def _fallback_bucket(self, mail: MailItem, now: datetime) -> str:
         text = f"{mail.subject} {mail.preview} {mail.body_text[:800]}".lower()
-        if due_at and due_at <= now + timedelta(hours=48):
-            return "immediate"
-        if due_at and due_at <= now + timedelta(days=7):
-            return "weekly"
         if any(k in text for k in ["urgent", "asap", "deadline", "exam today", "final reminder"]):
             return "immediate"
         if any(k in text for k in ["this week", "todo", "action required", "assignment"]):
             return "weekly"
         return "reference"
 
-    async def _llm_bucket(self, mail: MailItem, due_at: datetime | None, now: datetime) -> str | None:
+    async def _llm_bucket(self, mail: MailItem, now: datetime) -> str | None:
         if not self.llm_api_key or not self.llm_model:
             return None
-
-        due_text = due_at.isoformat() if due_at else "none"
         prompt = (
             "You classify student emails into one of exactly three labels: "
             "immediate, weekly, reference.\n"
@@ -66,7 +60,6 @@ class MailClassifier:
             "preview": mail.preview,
             "body_text": mail.body_text[:1200],
             "sender": mail.sender,
-            "due_at": due_text,
         }
         payload = {
             "model": self.llm_model,
@@ -91,7 +84,7 @@ class MailClassifier:
             return None
         return None
 
-    async def classify(self, mails: list[MailItem], due_map: dict[int, datetime | None], now: datetime) -> MailBuckets:
+    async def classify(self, mails: list[MailItem], now: datetime) -> MailBuckets:
         immediate: list[MailItem] = []
         weekly: list[MailItem] = []
         reference: list[MailItem] = []
@@ -99,11 +92,10 @@ class MailClassifier:
         sem = asyncio.Semaphore(self.llm_max_parallel)
 
         async def classify_one(idx: int, mail: MailItem) -> None:
-            due_at = due_map.get(idx)
             async with sem:
-                label = await self._llm_bucket(mail, due_at, now)
+                label = await self._llm_bucket(mail, now)
             if label is None:
-                label = self._fallback_bucket(mail, due_at, now)
+                label = self._fallback_bucket(mail, now)
             labels[idx] = label
 
         await asyncio.gather(*(classify_one(idx, mail) for idx, mail in enumerate(mails)))

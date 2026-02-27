@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .DS_Store
 data/ms_token.json
+data/canvas_feed_cache.json
