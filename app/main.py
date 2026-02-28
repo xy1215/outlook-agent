@@ -45,6 +45,10 @@ mail_classifier = MailClassifier(
     llm_model=settings.llm_model,
     llm_timeout_sec=settings.llm_timeout_sec,
     llm_max_parallel=settings.llm_max_parallel,
+    llm_enabled=settings.llm_mail_enabled,
+    llm_max_calls_per_run=settings.llm_mail_max_calls_per_run,
+    llm_cache_ttl_hours=settings.llm_cache_ttl_hours,
+    llm_cache_path=settings.llm_mail_cache_path,
 )
 digest_service = DigestService(
     canvas_client,
@@ -61,6 +65,9 @@ digest_service = DigestService(
     settings.llm_model,
     settings.llm_timeout_sec,
     settings.llm_max_parallel,
+    settings.llm_canvas_max_calls_per_run,
+    settings.llm_cache_ttl_hours,
+    settings.llm_canvas_cache_path,
 )
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None
@@ -138,9 +145,9 @@ async def auth_logout() -> dict:
 
 
 @app.get("/api/today")
-async def get_today() -> dict:
+async def get_today(refresh: bool = False) -> dict:
     global latest_digest
-    if latest_digest is None:
+    if refresh or latest_digest is None:
         latest_digest = await digest_service.build()
     return latest_digest.model_dump(mode="json")
 

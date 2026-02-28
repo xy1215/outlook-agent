@@ -23,8 +23,9 @@ async function loadAuthStatus() {
   }
 }
 
-async function loadDigest() {
-  const res = await fetch('/api/today');
+async function loadDigest(forceRefresh = false) {
+  const endpoint = forceRefresh ? '/api/today?refresh=1' : '/api/today';
+  const res = await fetch(endpoint);
   const data = await res.json();
   const nowTs = data.generated_at ? new Date(data.generated_at).getTime() : Date.now();
   const updatedText = data.generated_at ? new Date(data.generated_at).toLocaleString() : '未知';
@@ -68,7 +69,14 @@ async function loadDigest() {
       const hoursLeft = dueTs ? (dueTs - nowTs) / 3600000 : 999;
       const isRed = dueTs && hoursLeft <= 6;
       const barClass = isRed ? 'ddl-fill ddl-fill-red breathing' : 'ddl-fill';
-      const status = dueTs ? `进度 ${(ratio * 100).toFixed(0)}%` : '无 DDL 进度';
+      let status = '无 DDL 进度';
+      if (dueTs) {
+        const diffMs = dueTs - nowTs;
+        const absMinutes = Math.floor(Math.abs(diffMs) / 60000);
+        const hh = Math.floor(absMinutes / 60);
+        const mm = absMinutes % 60;
+        status = diffMs >= 0 ? `剩余 ${hh} 小时 ${mm} 分钟` : `已超时 ${hh} 小时 ${mm} 分钟`;
+      }
 
       li.innerHTML = `
         <div><strong>${due}</strong> | ${task.title} ${task.url ? `<a href="${task.url}" target="_blank">打开</a>` : ''}</div>
@@ -142,7 +150,7 @@ async function disconnectOutlook() {
   await loadDigest();
 }
 
-document.getElementById('refresh').addEventListener('click', loadDigest);
+document.getElementById('refresh').addEventListener('click', () => loadDigest(true));
 document.getElementById('runNow').addEventListener('click', runNow);
 document.getElementById('connectOutlook').addEventListener('click', connectOutlook);
 document.getElementById('disconnectOutlook').addEventListener('click', disconnectOutlook);

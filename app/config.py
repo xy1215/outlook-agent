@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="", alias="LLM_MODEL")
     llm_timeout_sec: int = Field(default=12, alias="LLM_TIMEOUT_SEC")
     llm_max_parallel: int = Field(default=6, alias="LLM_MAX_PARALLEL")
+    llm_mail_enabled: bool = Field(default=False, alias="LLM_MAIL_ENABLED")
+    llm_mail_max_calls_per_run: int = Field(default=8, alias="LLM_MAIL_MAX_CALLS_PER_RUN")
+    llm_canvas_max_calls_per_run: int = Field(default=24, alias="LLM_CANVAS_MAX_CALLS_PER_RUN")
+    llm_cache_ttl_hours: int = Field(default=72, alias="LLM_CACHE_TTL_HOURS")
+    llm_mail_cache_path: str = Field(default="data/llm_mail_cache.json", alias="LLM_MAIL_CACHE_PATH")
+    llm_canvas_cache_path: str = Field(default="data/llm_canvas_cache.json", alias="LLM_CANVAS_CACHE_PATH")
 
 
 settings = Settings()

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+import hashlib
 import json
+from pathlib import Path
 from zoneinfo import ZoneInfo
 import httpx
 
@@ -29,6 +31,9 @@ class DigestService:
         llm_model: str = "",
         llm_timeout_sec: int = 12,
         llm_max_parallel: int = 6,
+        llm_canvas_max_calls_per_run: int = 24,
+        llm_cache_ttl_hours: int = 72,
+        llm_canvas_cache_path: str = "data/llm_canvas_cache.json",
     ) -> None:
         self.canvas_client = canvas_client
         self.outlook_client = outlook_client
@@ -44,6 +49,55 @@ class DigestService:
         self.llm_model = (llm_model or "").strip()
         self.llm_timeout_sec = max(3, llm_timeout_sec)
         self.llm_max_parallel = max(1, llm_max_parallel)
+        self.llm_canvas_max_calls_per_run = max(0, llm_canvas_max_calls_per_run)
+        self.llm_cache_ttl_hours = max(1, llm_cache_ttl_hours)
+        self.llm_canvas_cache_path = Path(llm_canvas_cache_path)
+        self._llm_canvas_cache: dict[str, dict[str, str]] = {}
+        self._load_canvas_cache()
+
+    def _load_canvas_cache(self) -> None:
+        if not self.llm_canvas_cache_path.exists():
+            self._llm_canvas_cache = {}
+            return
+        try:
+            payload = json.loads(self.llm_canvas_cache_path.read_text(encoding="utf-8"))
+            self._llm_canvas_cache = payload if isinstance(payload, dict) else {}
+        except Exception:
+            self._llm_canvas_cache = {}
+
+    def _save_canvas_cache(self) -> None:
+        try:
+            self.llm_canvas_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self.llm_canvas_cache_path.write_text(json.dumps(self._llm_canvas_cache, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            return
+
+    @staticmethod
+    def _canvas_cache_key(task: TaskItem) -> str:
+        text = f"{task.title}\n{task.course or ''}\n{task.details or ''}\n{task.due_at.isoformat() if task.due_at else ''}".strip().lower()
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _canvas_cache_get(self, key: str, now: datetime) -> bool | None:
+        row = self._llm_canvas_cache.get(key)
+        if not isinstance(row, dict):
+            return None
+        label = str(row.get("label", "")).strip().lower()
+        ts_raw = row.get("updated_at")
+        if label not in {"actionable", "notification"} or not isinstance(ts_raw, str):
+            return None
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except ValueError:
+            return None
+        if now - ts > timedelta(hours=self.llm_cache_ttl_hours):
+            return None
+        return label == "actionable"
+
+    def _canvas_cache_set(self, key: str, actionable: bool, now: datetime) -> None:
+        self._llm_canvas_cache[key] = {
+            "label": "actionable" if actionable else "notification",
+            "updated_at": now.isoformat(),
+        }
 
     def _is_due_soon(self, task: TaskItem, now: datetime) -> bool:
         if task.due_at is None:
@@ -161,10 +215,18 @@ class DigestService:
         keep: list[TaskItem] = []
         sem = asyncio.Semaphore(self.llm_max_parallel)
         lock = asyncio.Lock()
+        llm_calls = [0]
 
         async def classify_one(task: TaskItem) -> None:
-            async with sem:
-                llm_result = await self._llm_is_actionable_canvas_task(task, now)
+            cache_key = self._canvas_cache_key(task)
+            llm_result = self._canvas_cache_get(cache_key, now)
+            if llm_result is None and llm_calls[0] < self.llm_canvas_max_calls_per_run:
+                async with sem:
+                    model_result = await self._llm_is_actionable_canvas_task(task, now)
+                if model_result is not None:
+                    llm_calls[0] += 1
+                    llm_result = model_result
+                    self._canvas_cache_set(cache_key, llm_result, now)
             should_keep = self._fallback_is_actionable_canvas_task(task) if llm_result is None else llm_result
             if not should_keep:
                 return
@@ -172,6 +234,7 @@ class DigestService:
                 keep.append(task)
 
         await asyncio.gather(*(classify_one(task) for task in tasks))
+        self._save_canvas_cache()
         return keep
 
     async def build(self) -> DailyDigest:

@@ -71,16 +71,20 @@ uvicorn app.main:app --reload --port 8000
 - `PUSH_DUE_WITHIN_HOURS=48` 仅推送 48 小时内截止任务
 - `PUSH_PERSONA=auto` 到期任务推送风格（`auto/senior/cute`）
 - `LLM_API_KEY` + `LLM_MODEL` 用于 Canvas 日历事件分类（作业任务 vs 通知/announcement）
+- `LLM_MAIL_ENABLED=false` 默认关闭邮件分诊 LLM（建议先关，省 token）
+- `LLM_MAIL_MAX_CALLS_PER_RUN=8` 单次运行最多邮件 LLM 调用
+- `LLM_CANVAS_MAX_CALLS_PER_RUN=24` 单次运行最多 Canvas 任务 LLM 调用
+- `LLM_CACHE_TTL_HOURS=72` LLM 结果缓存时间，减少重复调用
 
 ## 4. Web 页面功能
 
 - `连接 Outlook`: 首次授权 Microsoft 账号
 - `断开 Outlook`: 删除本地 token，重新授权
-- `刷新摘要`: 读取并展示当天数据
+- `刷新摘要`: 强制重新计算今日摘要（会更新 generated_at）
 - `立即执行并推送`: 立即拉取 Outlook（和可选 Canvas）并发 iPhone 推送
 - 页面将按「立刻处理 / 本周待办 / 信息参考」展示邮件分诊结果
 - 页面单独展示即将到期催办文案（当前风格/学姐风/可爱风）
-- 待办任务列表含 DDL 进度条，公式为 `(当前时间-发布时间)/(截止时间-发布时间)`
+- 待办任务列表显示“剩余 X 小时 Y 分钟”（进度条保留，公式 `(当前时间-发布时间)/(截止时间-发布时间)`）
 - 距离 DDL <= 6 小时时进度条强制红色 `#FF0000` 并显示呼吸灯
 
 ## 5. 后续升级建议

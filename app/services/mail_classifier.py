@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import timedelta
+import hashlib
 import json
+from pathlib import Path
 
 import httpx
 
@@ -26,6 +29,10 @@ class MailClassifier:
         llm_model: str = "",
         llm_timeout_sec: int = 12,
         llm_max_parallel: int = 6,
+        llm_enabled: bool = False,
+        llm_max_calls_per_run: int = 8,
+        llm_cache_ttl_hours: int = 72,
+        llm_cache_path: str = "data/llm_mail_cache.json",
     ) -> None:
         self.timezone_name = timezone_name
         self.llm_api_base = llm_api_base.rstrip("/")
@@ -33,6 +40,55 @@ class MailClassifier:
         self.llm_model = llm_model.strip()
         self.llm_timeout_sec = max(3, llm_timeout_sec)
         self.llm_max_parallel = max(1, llm_max_parallel)
+        self.llm_enabled = llm_enabled
+        self.llm_max_calls_per_run = max(0, llm_max_calls_per_run)
+        self.llm_cache_ttl_hours = max(1, llm_cache_ttl_hours)
+        self.llm_cache_path = Path(llm_cache_path)
+        self._llm_cache: dict[str, dict[str, str]] = {}
+        self._load_cache()
+
+    def _load_cache(self) -> None:
+        if not self.llm_cache_path.exists():
+            self._llm_cache = {}
+            return
+        try:
+            payload = json.loads(self.llm_cache_path.read_text(encoding="utf-8"))
+            self._llm_cache = payload if isinstance(payload, dict) else {}
+        except Exception:
+            self._llm_cache = {}
+
+    def _save_cache(self) -> None:
+        try:
+            self.llm_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self.llm_cache_path.write_text(json.dumps(self._llm_cache, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            return
+
+    @staticmethod
+    def _cache_key(mail: MailItem) -> str:
+        text = f"{mail.subject}\n{mail.sender}\n{mail.preview}\n{mail.body_text[:1200]}".strip().lower()
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _cache_get(self, key: str, now: datetime) -> str | None:
+        row = self._llm_cache.get(key)
+        if not isinstance(row, dict):
+            return None
+        label = str(row.get("label", "")).strip().lower()
+        ts_raw = row.get("updated_at")
+        if label not in {"immediate", "weekly", "reference"}:
+            return None
+        if not isinstance(ts_raw, str):
+            return None
+        try:
+            ts = datetime.fromisoformat(ts_raw)
+        except ValueError:
+            return None
+        if now - ts > timedelta(hours=self.llm_cache_ttl_hours):
+            return None
+        return label
+
+    def _cache_set(self, key: str, label: str, now: datetime) -> None:
+        self._llm_cache[key] = {"label": label, "updated_at": now.isoformat()}
 
     def _fallback_bucket(self, mail: MailItem, now: datetime) -> str:
         text = f"{mail.subject} {mail.preview} {mail.body_text[:800]}".lower()
@@ -43,7 +99,7 @@ class MailClassifier:
         return "reference"
 
     async def _llm_bucket(self, mail: MailItem, now: datetime) -> str | None:
-        if not self.llm_api_key or not self.llm_model:
+        if not self.llm_enabled or not self.llm_api_key or not self.llm_model:
             return None
         prompt = (
             "You classify student emails into one of exactly three labels: "
@@ -90,15 +146,24 @@ class MailClassifier:
         reference: list[MailItem] = []
         labels: dict[int, str] = {}
         sem = asyncio.Semaphore(self.llm_max_parallel)
+        llm_calls = [0]
 
         async def classify_one(idx: int, mail: MailItem) -> None:
-            async with sem:
-                label = await self._llm_bucket(mail, now)
+            cache_key = self._cache_key(mail)
+            label = self._cache_get(cache_key, now)
+            if label is None and llm_calls[0] < self.llm_max_calls_per_run:
+                async with sem:
+                    llm_label = await self._llm_bucket(mail, now)
+                if llm_label is not None:
+                    llm_calls[0] += 1
+                    label = llm_label
+                    self._cache_set(cache_key, label, now)
             if label is None:
                 label = self._fallback_bucket(mail, now)
             labels[idx] = label
 
         await asyncio.gather(*(classify_one(idx, mail) for idx, mail in enumerate(mails)))
+        self._save_cache()
 
         for idx, mail in enumerate(mails):
             label = labels.get(idx, "reference")

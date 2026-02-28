@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 data/ms_token.json
 data/canvas_feed_cache.json
+data/llm_mail_cache.json
+data/llm_canvas_cache.json
