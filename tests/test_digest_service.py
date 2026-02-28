@@ -86,6 +86,36 @@ def test_mail_classifier_fallback_buckets_without_due_map():
     assert buckets.reference[0].category == "信息参考"
 
 
+def test_mail_classifier_demotes_assignment_graded_to_reference():
+    classifier = MailClassifier(timezone_name="America/Los_Angeles", llm_api_key="", llm_model="")
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mails = [
+        MailItem(
+            subject="Assignment Graded: Chapter 5 Quiz",
+            sender="notifications@instructure.com",
+            received_at=now,
+            preview="Your assignment has been graded.",
+        )
+    ]
+    buckets = asyncio.run(classifier.classify(mails, now))
+    assert len(buckets.reference) == 1
+    assert buckets.reference[0].category == "信息参考"
+
+
+def test_marketing_welcome_mail_not_marked_important_without_action_signal():
+    service = make_service()
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mail = MailItem(
+        subject="Welcome to Figma! Let's get you set up.",
+        sender="announcements@figma.com",
+        received_at=now,
+        preview="Get started quickly with templates.",
+        body_text="Welcome! Explore features and product updates.",
+        is_important=True,
+    )
+    assert service._is_mail_important(mail) is False
+
+
 def test_resolve_push_style_for_auto_persona():
     service = DigestService(
         canvas_client=DummyCanvasClient(),

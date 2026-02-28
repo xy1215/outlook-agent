@@ -92,6 +92,14 @@ class MailClassifier:
 
     def _fallback_bucket(self, mail: MailItem, now: datetime) -> str:
         text = f"{mail.subject} {mail.preview} {mail.body_text[:800]}".lower()
+        graded_noise = [
+            "assignment graded",
+            "graded:",
+            "your assignment has been graded",
+            "submission posted",
+        ]
+        if any(k in text for k in graded_noise):
+            return "reference"
         if any(k in text for k in ["urgent", "asap", "deadline", "exam today", "final reminder"]):
             return "immediate"
         if any(k in text for k in ["this week", "todo", "action required", "assignment"]):
@@ -108,6 +116,7 @@ class MailClassifier:
             "- immediate: urgent action needed now or within 48h.\n"
             "- weekly: action needed this week but not immediate.\n"
             "- reference: informational only.\n"
+            "- Strong noise: any 'assignment graded' or grade-posted notification should be reference.\n"
             "Return strict JSON: {\"label\":\"immediate|weekly|reference\"}."
         )
         user = {

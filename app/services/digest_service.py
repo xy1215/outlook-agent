@@ -109,9 +109,36 @@ class DigestService:
         return today_floor <= due_local <= now_local + timedelta(days=self.lookahead_days)
 
     def _is_mail_important(self, mail: MailItem) -> bool:
-        if mail.is_important:
-            return True
         text = f"{mail.subject} {mail.preview} {mail.body_text[:1200]}".lower()
+        marketing_onboarding = [
+            "welcome to",
+            "welcome",
+            "onboarding",
+            "getting started",
+            "product update",
+            "newsletter",
+            "promo",
+            "marketing",
+            "offer",
+            "sale",
+            "figma",
+        ]
+        high_signal = [
+            "action required",
+            "required",
+            "deadline",
+            "due",
+            "compliance",
+            "disclosure",
+            "verify",
+            "urgent",
+            "asap",
+        ]
+        # Demote onboarding/marketing style mails unless they carry hard action signals.
+        if any(k in text for k in marketing_onboarding) and not any(k in text for k in high_signal):
+            return False
+        if mail.is_important and any(k in text for k in high_signal):
+            return True
         return any(keyword in text for keyword in self.keywords)
 
     @staticmethod
