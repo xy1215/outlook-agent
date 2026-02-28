@@ -23,6 +23,24 @@ async function loadAuthStatus() {
   }
 }
 
+async function loadServiceHealth() {
+  const el = document.getElementById('serviceStatus');
+  if (!el) return;
+  try {
+    const res = await fetch('/api/health', { cache: 'no-store' });
+    if (!res.ok) throw new Error('health http error');
+    const data = await res.json();
+    const now = data?.now_utc ? new Date(data.now_utc).toLocaleTimeString('zh-CN', { hour12: false }) : '--:--:--';
+    el.textContent = `服务状态: 在线 (${now})`;
+    el.classList.remove('down');
+    el.classList.add('ok');
+  } catch (_) {
+    el.textContent = '服务状态: 离线';
+    el.classList.remove('ok');
+    el.classList.add('down');
+  }
+}
+
 async function loadDigest(forceRefresh = false) {
   const endpoint = forceRefresh ? '/api/today?refresh=1' : '/api/today';
   const res = await fetch(endpoint);
@@ -250,6 +268,8 @@ document.getElementById('runNow').addEventListener('click', runNow);
 document.getElementById('connectOutlook').addEventListener('click', connectOutlook);
 document.getElementById('disconnectOutlook').addEventListener('click', disconnectOutlook);
 loadAuthStatus();
+loadServiceHealth();
+setInterval(loadServiceHealth, 15000);
 loadDigest();
 startRealtimeClock();
 loadTodayWeather();

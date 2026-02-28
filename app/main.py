@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+import os
 import secrets
 from typing import Optional
 
@@ -72,6 +74,7 @@ digest_service = DigestService(
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None
 oauth_state: Optional[str] = None
+started_at = datetime.utcnow()
 
 
 async def run_daily_job() -> dict:
@@ -106,6 +109,16 @@ async def auth_status() -> dict:
     return {
         "configured": outlook_client.is_configured(),
         "connected": outlook_client.is_connected(),
+    }
+
+
+@app.get("/api/health")
+async def health() -> dict:
+    return {
+        "ok": True,
+        "pid": os.getpid(),
+        "started_at_utc": started_at.isoformat() + "Z",
+        "now_utc": datetime.utcnow().isoformat() + "Z",
     }
 
 
