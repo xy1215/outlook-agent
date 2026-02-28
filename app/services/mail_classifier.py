@@ -18,6 +18,8 @@ class MailBuckets:
     immediate: list[MailItem]
     weekly: list[MailItem]
     reference: list[MailItem]
+    internship: list[MailItem]
+    research: list[MailItem]
 
 
 class MailClassifier:
@@ -75,7 +77,7 @@ class MailClassifier:
             return None
         label = str(row.get("label", "")).strip().lower()
         ts_raw = row.get("updated_at")
-        if label not in {"immediate", "weekly", "reference"}:
+        if label not in {"immediate", "weekly", "reference", "internship", "research"}:
             return None
         if not isinstance(ts_raw, str):
             return None
@@ -98,8 +100,33 @@ class MailClassifier:
             "your assignment has been graded",
             "submission posted",
         ]
+        internship_signal = [
+            "internship",
+            "summer analyst",
+            "new grad",
+            "campus recruiting",
+            "career fair",
+            "referral",
+            "co-op",
+            "intern role",
+        ]
+        research_signal = [
+            "research opportunity",
+            "research study",
+            "participant",
+            "lab position",
+            "phd student",
+            "survey study",
+            "irb",
+            "ra position",
+            "research assistant",
+        ]
         if any(k in text for k in graded_noise):
             return "reference"
+        if any(k in text for k in internship_signal):
+            return "internship"
+        if any(k in text for k in research_signal):
+            return "research"
         if any(k in text for k in ["urgent", "asap", "deadline", "exam today", "final reminder"]):
             return "immediate"
         if any(k in text for k in ["this week", "todo", "action required", "assignment"]):
@@ -110,14 +137,16 @@ class MailClassifier:
         if not self.llm_enabled or not self.llm_api_key or not self.llm_model:
             return None
         prompt = (
-            "You classify student emails into one of exactly three labels: "
-            "immediate, weekly, reference.\n"
+            "You classify student emails into one of exactly five labels: "
+            "immediate, weekly, reference, internship, research.\n"
             "Rules:\n"
             "- immediate: urgent action needed now or within 48h.\n"
             "- weekly: action needed this week but not immediate.\n"
             "- reference: informational only.\n"
+            "- internship: internship/co-op/new-grad recruiting opportunities.\n"
+            "- research: research study, participant recruitment, RA/lab opportunities.\n"
             "- Strong noise: any 'assignment graded' or grade-posted notification should be reference.\n"
-            "Return strict JSON: {\"label\":\"immediate|weekly|reference\"}."
+            "Return strict JSON: {\"label\":\"immediate|weekly|reference|internship|research\"}."
         )
         user = {
             "now": now.isoformat(),
@@ -143,7 +172,7 @@ class MailClassifier:
             content = resp.json()["choices"][0]["message"]["content"]
             parsed = json.loads(content)
             label = str(parsed.get("label", "")).strip().lower()
-            if label in {"immediate", "weekly", "reference"}:
+            if label in {"immediate", "weekly", "reference", "internship", "research"}:
                 return label
         except Exception:
             return None
@@ -153,6 +182,8 @@ class MailClassifier:
         immediate: list[MailItem] = []
         weekly: list[MailItem] = []
         reference: list[MailItem] = []
+        internship: list[MailItem] = []
+        research: list[MailItem] = []
         labels: dict[int, str] = {}
         sem = asyncio.Semaphore(self.llm_max_parallel)
         llm_calls = [0]
@@ -182,8 +213,20 @@ class MailClassifier:
             elif label == "weekly":
                 mail.category = "本周待办"
                 weekly.append(mail)
+            elif label == "internship":
+                mail.category = "实习机会"
+                internship.append(mail)
+            elif label == "research":
+                mail.category = "研究机会"
+                research.append(mail)
             else:
                 mail.category = "信息参考"
                 reference.append(mail)
 
-        return MailBuckets(immediate=immediate, weekly=weekly, reference=reference)
+        return MailBuckets(
+            immediate=immediate,
+            weekly=weekly,
+            reference=reference,
+            internship=internship,
+            research=research,
+        )

@@ -54,10 +54,14 @@ async function loadDigest(forceRefresh = false) {
   document.getElementById('immediateTitleCount').textContent = `${(data.mails_immediate || []).length}`;
   document.getElementById('weeklyTitleCount').textContent = `${(data.mails_weekly || []).length}`;
   document.getElementById('referenceTitleCount').textContent = `${(data.mails_reference || []).length}`;
+  document.getElementById('internshipTitleCount').textContent = `${(data.mails_internship || []).length}`;
+  document.getElementById('researchTitleCount').textContent = `${(data.mails_research || []).length}`;
   document.getElementById('triageSummary').textContent =
     `邮件分类统计：立刻处理 ${ (data.mails_immediate || []).length } 封，` +
     `本周待办 ${ (data.mails_weekly || []).length } 封，` +
-    `信息参考 ${ (data.mails_reference || []).length } 封`;
+    `信息参考 ${ (data.mails_reference || []).length } 封，` +
+    `实习机会 ${ (data.mails_internship || []).length } 封，` +
+    `研究机会 ${ (data.mails_research || []).length } 封`;
   document.getElementById('pushStyle').textContent = `催办风格：${data.due_push_style || '未设置'}`;
   document.getElementById('dueNudgeCurrent').textContent = `当前风格文案：${data.due_nudge_current || '暂无'}`;
   document.getElementById('dueNudgeSenior').textContent = `学姐风文案：${data.due_nudge_senior || '暂无'}`;
@@ -134,6 +138,8 @@ async function loadDigest(forceRefresh = false) {
   renderMailList('mailsImmediate', data.mails_immediate || [], '当前没有需要立刻处理的邮件', 5);
   renderMailList('mailsWeekly', data.mails_weekly || [], '当前没有本周待办邮件', 6);
   renderMailList('mailsReference', data.mails_reference || [], '当前没有信息参考邮件', 8);
+  renderMailList('mailsInternship', data.mails_internship || [], '当前没有实习机会邮件', 6);
+  renderMailList('mailsResearch', data.mails_research || [], '当前没有研究机会邮件', 6);
 
   if (
     !(data.mails_immediate || []).length &&

@@ -286,19 +286,29 @@ class DigestService:
             mails_immediate: list[MailItem] = []
             mails_weekly: list[MailItem] = []
             mails_reference: list[MailItem] = mails
+            mails_internship: list[MailItem] = []
+            mails_research: list[MailItem] = []
         else:
             buckets = await self.mail_classifier.classify(mails, now)
             mails_immediate = buckets.immediate
             mails_weekly = buckets.weekly
             mails_reference = buckets.reference
+            mails_internship = buckets.internship
+            mails_research = buckets.research
 
         due_tasks.sort(key=lambda x: x.due_at or datetime.max.replace(tzinfo=ZoneInfo(self.timezone_name)))
         important_mails.sort(key=lambda x: x.received_at, reverse=True)
         mails_immediate.sort(key=lambda x: x.received_at, reverse=True)
         mails_weekly.sort(key=lambda x: x.received_at, reverse=True)
         mails_reference.sort(key=lambda x: x.received_at, reverse=True)
+        mails_internship.sort(key=lambda x: x.received_at, reverse=True)
+        mails_research.sort(key=lambda x: x.received_at, reverse=True)
 
-        summary = f"今天有 {len(due_tasks)} 个 Canvas 待办任务，{len(mails_immediate)} 封立刻处理邮件，{len(mails_weekly)} 封本周待办邮件。"
+        summary = (
+            f"今天有 {len(due_tasks)} 个 Canvas 待办任务，"
+            f"{len(mails_immediate)} 封立刻处理，{len(mails_weekly)} 封本周待办，"
+            f"{len(mails_internship)} 封实习机会，{len(mails_research)} 封研究机会。"
+        )
 
         resolved_style = self._resolve_push_style(due_tasks, now)
         push_tasks = self._collect_push_tasks(due_tasks, now)
@@ -311,6 +321,8 @@ class DigestService:
             mails_immediate=mails_immediate,
             mails_weekly=mails_weekly,
             mails_reference=mails_reference,
+            mails_internship=mails_internship,
+            mails_research=mails_research,
             due_push_style=resolved_style,
             next_due_hint=self._build_next_due_hint(due_tasks, now),
             due_nudge_current=self._build_persona_nudge(push_tasks, now, resolved_style),

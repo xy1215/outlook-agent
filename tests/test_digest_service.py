@@ -102,6 +102,30 @@ def test_mail_classifier_demotes_assignment_graded_to_reference():
     assert buckets.reference[0].category == "信息参考"
 
 
+def test_mail_classifier_detects_internship_and_research_buckets():
+    classifier = MailClassifier(timezone_name="America/Los_Angeles", llm_api_key="", llm_model="")
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    mails = [
+        MailItem(
+            subject="Summer Internship Opportunity - Data Analyst",
+            sender="career@company.com",
+            received_at=now,
+            preview="Campus recruiting internship applications open.",
+        ),
+        MailItem(
+            subject="Participate in a Robot Research Study",
+            sender="research@wisc.edu",
+            received_at=now,
+            preview="Research participant recruitment ongoing.",
+        ),
+    ]
+    buckets = asyncio.run(classifier.classify(mails, now))
+    assert len(buckets.internship) == 1
+    assert len(buckets.research) == 1
+    assert buckets.internship[0].category == "实习机会"
+    assert buckets.research[0].category == "研究机会"
+
+
 def test_marketing_welcome_mail_not_marked_important_without_action_signal():
     service = make_service()
     now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)

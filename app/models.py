@@ -38,6 +38,8 @@ class DailyDigest(BaseModel):
     mails_immediate: list[MailItem] = Field(default_factory=list)
     mails_weekly: list[MailItem] = Field(default_factory=list)
     mails_reference: list[MailItem] = Field(default_factory=list)
+    mails_internship: list[MailItem] = Field(default_factory=list)
+    mails_research: list[MailItem] = Field(default_factory=list)
     push_preview: str = ""
     due_push_style: str = ""
     next_due_hint: str = ""
