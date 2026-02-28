@@ -85,27 +85,27 @@ button {
 #connectOutlook { background: #50bc8a; color: #072414; }
 #disconnectOutlook { background: #ef4444; color: #fff; }
 
-.kpi-grid {
-  margin-top: 16px;
+.live-row {
+  margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 10px;
 }
-.kpi-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 14px;
+.live-card {
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 10px 12px;
 }
-.kpi-label {
-  color: var(--muted);
+.live-label {
   font-size: 12px;
+  color: #cae7dc;
 }
-.kpi-value {
-  margin-top: 6px;
-  font-size: 28px;
+.live-value {
+  margin-top: 4px;
+  font-size: 16px;
+  color: #ffffff;
   font-weight: 700;
-  color: #102d23;
 }
 
 .card {
@@ -223,9 +223,7 @@ a { color: var(--primary); }
 }
 
 @media (max-width: 900px) {
-  .kpi-grid {
-    grid-template-columns: repeat(2, minmax(120px, 1fr));
-  }
+  .live-row { grid-template-columns: 1fr; }
   .grid {
     grid-template-columns: 1fr;
   }

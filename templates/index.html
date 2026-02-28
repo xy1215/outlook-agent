@@ -23,25 +23,16 @@
           <button id="refresh">刷新摘要</button>
           <button id="runNow">立即执行并推送</button>
         </div>
-      </section>
-
-      <section class="kpi-grid">
-        <article class="kpi-card">
-          <div class="kpi-label">Canvas 待办</div>
-          <div class="kpi-value" id="taskCount">-</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">立刻处理</div>
-          <div class="kpi-value" id="immediateCount">-</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">本周待办</div>
-          <div class="kpi-value" id="weeklyCount">-</div>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-label">信息参考</div>
-          <div class="kpi-value" id="referenceCount">-</div>
-        </article>
+        <div class="live-row">
+          <div class="live-card">
+            <div class="live-label">实时时钟</div>
+            <div class="live-value" id="realtimeClock">加载中...</div>
+          </div>
+          <div class="live-card">
+            <div class="live-label">本日天气</div>
+            <div class="live-value" id="weatherToday">加载中...</div>
+          </div>
+        </div>
       </section>
 
       <section class="card focus-card">

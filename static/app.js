@@ -32,10 +32,6 @@ async function loadDigest(forceRefresh = false) {
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
   document.getElementById('generatedAt').textContent = `数据更新时间：${updatedText}`;
-  document.getElementById('taskCount').textContent = `${(data.tasks || []).length}`;
-  document.getElementById('immediateCount').textContent = `${(data.mails_immediate || []).length}`;
-  document.getElementById('weeklyCount').textContent = `${(data.mails_weekly || []).length}`;
-  document.getElementById('referenceCount').textContent = `${(data.mails_reference || []).length}`;
   document.getElementById('taskTitleCount').textContent = `${(data.tasks || []).length}`;
   document.getElementById('immediateTitleCount').textContent = `${(data.mails_immediate || []).length}`;
   document.getElementById('weeklyTitleCount').textContent = `${(data.mails_weekly || []).length}`;
@@ -133,6 +129,91 @@ async function loadDigest(forceRefresh = false) {
 
 }
 
+function startRealtimeClock() {
+  const el = document.getElementById('realtimeClock');
+  if (!el) return;
+  const tick = () => {
+    const now = new Date();
+    const text = now.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    el.textContent = text;
+  };
+  tick();
+  setInterval(tick, 1000);
+}
+
+function weatherCodeToText(code) {
+  const map = {
+    0: '晴',
+    1: '大部晴',
+    2: '局部多云',
+    3: '阴',
+    45: '有雾',
+    48: '雾凇',
+    51: '小毛雨',
+    53: '毛雨',
+    55: '大毛雨',
+    61: '小雨',
+    63: '中雨',
+    65: '大雨',
+    71: '小雪',
+    73: '中雪',
+    75: '大雪',
+    80: '阵雨',
+    81: '强阵雨',
+    82: '暴雨',
+    95: '雷暴',
+  };
+  return map[code] || '多变';
+}
+
+async function loadTodayWeather() {
+  const el = document.getElementById('weatherToday');
+  if (!el) return;
+  el.textContent = '读取中...';
+
+  const fetchByLatLon = async (lat, lon, label) => {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      '&daily=weathercode,temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('weather http error');
+    const data = await res.json();
+    const code = data?.daily?.weathercode?.[0];
+    const maxT = data?.daily?.temperature_2m_max?.[0];
+    const minT = data?.daily?.temperature_2m_min?.[0];
+    const weatherText = weatherCodeToText(code);
+    const maxLabel = Number.isFinite(maxT) ? Math.round(maxT) : '--';
+    const minLabel = Number.isFinite(minT) ? Math.round(minT) : '--';
+    el.textContent = `${label} ${weatherText} ${maxLabel}°/${minLabel}°`;
+  };
+
+  const getPos = () =>
+    new Promise((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 7000, maximumAge: 3600000 }),
+    );
+
+  try {
+    if (!navigator.geolocation) throw new Error('geo unsupported');
+    const pos = await getPos();
+    await fetchByLatLon(pos.coords.latitude, pos.coords.longitude, '当前位置:');
+  } catch (_) {
+    try {
+      // Fallback: Madison, WI
+      await fetchByLatLon(43.0731, -89.4012, 'Madison:');
+    } catch (err) {
+      el.textContent = `天气读取失败`;
+    }
+  }
+}
+
 async function runNow() {
   const btn = document.getElementById('runNow');
   btn.disabled = true;
@@ -170,3 +251,5 @@ document.getElementById('connectOutlook').addEventListener('click', connectOutlo
 document.getElementById('disconnectOutlook').addEventListener('click', disconnectOutlook);
 loadAuthStatus();
 loadDigest();
+startRealtimeClock();
+loadTodayWeather();
