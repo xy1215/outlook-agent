@@ -49,6 +49,7 @@ mail_classifier = MailClassifier(
     llm_max_parallel=settings.llm_max_parallel,
     llm_enabled=settings.llm_mail_enabled,
     llm_max_calls_per_run=settings.llm_mail_max_calls_per_run,
+    llm_fail_fast_threshold=settings.llm_fail_fast_threshold,
     llm_cache_ttl_hours=settings.llm_cache_ttl_hours,
     llm_cache_path=settings.llm_mail_cache_path,
 )
@@ -68,6 +69,7 @@ digest_service = DigestService(
     settings.llm_timeout_sec,
     settings.llm_max_parallel,
     settings.llm_canvas_max_calls_per_run,
+    settings.llm_fail_fast_threshold,
     settings.llm_cache_ttl_hours,
     settings.llm_canvas_cache_path,
 )

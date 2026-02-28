@@ -32,6 +32,7 @@ class DigestService:
         llm_timeout_sec: int = 12,
         llm_max_parallel: int = 6,
         llm_canvas_max_calls_per_run: int = 24,
+        llm_fail_fast_threshold: int = 3,
         llm_cache_ttl_hours: int = 72,
         llm_canvas_cache_path: str = "data/llm_canvas_cache.json",
     ) -> None:
@@ -50,6 +51,7 @@ class DigestService:
         self.llm_timeout_sec = max(3, llm_timeout_sec)
         self.llm_max_parallel = max(1, llm_max_parallel)
         self.llm_canvas_max_calls_per_run = max(0, llm_canvas_max_calls_per_run)
+        self.llm_fail_fast_threshold = max(1, llm_fail_fast_threshold)
         self.llm_cache_ttl_hours = max(1, llm_cache_ttl_hours)
         self.llm_canvas_cache_path = Path(llm_canvas_cache_path)
         self._llm_canvas_cache: dict[str, dict[str, str]] = {}
@@ -242,18 +244,31 @@ class DigestService:
         keep: list[TaskItem] = []
         sem = asyncio.Semaphore(self.llm_max_parallel)
         lock = asyncio.Lock()
-        llm_calls = [0]
+        budget_lock = asyncio.Lock()
+        llm_state = {"remaining": self.llm_canvas_max_calls_per_run, "failures": 0, "circuit_open": False}
 
         async def classify_one(task: TaskItem) -> None:
             cache_key = self._canvas_cache_key(task)
             llm_result = self._canvas_cache_get(cache_key, now)
-            if llm_result is None and llm_calls[0] < self.llm_canvas_max_calls_per_run:
+            should_try_llm = False
+            if llm_result is None:
+                async with budget_lock:
+                    if (not llm_state["circuit_open"]) and llm_state["remaining"] > 0:
+                        llm_state["remaining"] -= 1  # Attempt consumes budget regardless of success/failure.
+                        should_try_llm = True
+            if llm_result is None and should_try_llm:
                 async with sem:
                     model_result = await self._llm_is_actionable_canvas_task(task, now)
                 if model_result is not None:
-                    llm_calls[0] += 1
                     llm_result = model_result
                     self._canvas_cache_set(cache_key, llm_result, now)
+                    async with budget_lock:
+                        llm_state["failures"] = 0
+                else:
+                    async with budget_lock:
+                        llm_state["failures"] += 1
+                        if llm_state["failures"] >= self.llm_fail_fast_threshold:
+                            llm_state["circuit_open"] = True
             should_keep = self._fallback_is_actionable_canvas_task(task) if llm_result is None else llm_result
             if not should_keep:
                 return

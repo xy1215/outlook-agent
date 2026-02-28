@@ -126,6 +126,51 @@ def test_mail_classifier_detects_internship_and_research_buckets():
     assert buckets.research[0].category == "研究机会"
 
 
+def test_mail_classifier_budget_counts_attempts_even_on_failures():
+    classifier = MailClassifier(
+        timezone_name="America/Los_Angeles",
+        llm_enabled=True,
+        llm_api_key="k",
+        llm_model="m",
+        llm_max_calls_per_run=2,
+    )
+    now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)
+    calls = [0]
+
+    async def fake_llm_bucket(mail, now_dt):
+        calls[0] += 1
+        return None
+
+    classifier._llm_bucket = fake_llm_bucket  # type: ignore[method-assign]
+    mails = [
+        MailItem(subject=f"mail {i}", sender="x@y.edu", received_at=now, preview="fyi")
+        for i in range(6)
+    ]
+    _ = asyncio.run(classifier.classify(mails, now))
+    assert calls[0] == 2
+
+
+def test_canvas_task_filter_budget_counts_attempts_even_on_failures():
+    service = make_service()
+    service.llm_api_key = "k"
+    service.llm_model = "m"
+    service.llm_canvas_max_calls_per_run = 2
+    now = datetime(2026, 2, 28, 2, 0, tzinfo=timezone.utc)
+    calls = [0]
+
+    async def fake_task_llm(task, now_dt):
+        calls[0] += 1
+        return None
+
+    service._llm_is_actionable_canvas_task = fake_task_llm  # type: ignore[method-assign]
+    tasks = [
+        TaskItem(source="canvas_feed", title=f"Homework {i}", details="assignment", due_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc))
+        for i in range(6)
+    ]
+    _ = asyncio.run(service._filter_canvas_tasks(tasks, now))
+    assert calls[0] == 2
+
+
 def test_marketing_welcome_mail_not_marked_important_without_action_signal():
     service = make_service()
     now = datetime(2026, 2, 25, 9, 0, tzinfo=timezone.utc)

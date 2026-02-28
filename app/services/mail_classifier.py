@@ -33,6 +33,7 @@ class MailClassifier:
         llm_max_parallel: int = 6,
         llm_enabled: bool = False,
         llm_max_calls_per_run: int = 8,
+        llm_fail_fast_threshold: int = 3,
         llm_cache_ttl_hours: int = 72,
         llm_cache_path: str = "data/llm_mail_cache.json",
     ) -> None:
@@ -44,6 +45,7 @@ class MailClassifier:
         self.llm_max_parallel = max(1, llm_max_parallel)
         self.llm_enabled = llm_enabled
         self.llm_max_calls_per_run = max(0, llm_max_calls_per_run)
+        self.llm_fail_fast_threshold = max(1, llm_fail_fast_threshold)
         self.llm_cache_ttl_hours = max(1, llm_cache_ttl_hours)
         self.llm_cache_path = Path(llm_cache_path)
         self._llm_cache: dict[str, dict[str, str]] = {}
@@ -186,18 +188,31 @@ class MailClassifier:
         research: list[MailItem] = []
         labels: dict[int, str] = {}
         sem = asyncio.Semaphore(self.llm_max_parallel)
-        llm_calls = [0]
+        budget_lock = asyncio.Lock()
+        llm_state = {"remaining": self.llm_max_calls_per_run, "failures": 0, "circuit_open": False}
 
         async def classify_one(idx: int, mail: MailItem) -> None:
             cache_key = self._cache_key(mail)
             label = self._cache_get(cache_key, now)
-            if label is None and llm_calls[0] < self.llm_max_calls_per_run:
+            should_try_llm = False
+            if label is None:
+                async with budget_lock:
+                    if (not llm_state["circuit_open"]) and llm_state["remaining"] > 0:
+                        llm_state["remaining"] -= 1  # Attempt consumes budget regardless of success/failure.
+                        should_try_llm = True
+            if label is None and should_try_llm:
                 async with sem:
                     llm_label = await self._llm_bucket(mail, now)
                 if llm_label is not None:
-                    llm_calls[0] += 1
                     label = llm_label
                     self._cache_set(cache_key, label, now)
+                    async with budget_lock:
+                        llm_state["failures"] = 0
+                else:
+                    async with budget_lock:
+                        llm_state["failures"] += 1
+                        if llm_state["failures"] >= self.llm_fail_fast_threshold:
+                            llm_state["circuit_open"] = True
             if label is None:
                 label = self._fallback_bucket(mail, now)
             labels[idx] = label
