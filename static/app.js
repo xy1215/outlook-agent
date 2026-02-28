@@ -32,6 +32,14 @@ async function loadDigest(forceRefresh = false) {
 
   document.getElementById('summary').textContent = `${data.date_label} | ${data.summary_text}`;
   document.getElementById('generatedAt').textContent = `数据更新时间：${updatedText}`;
+  document.getElementById('taskCount').textContent = `${(data.tasks || []).length}`;
+  document.getElementById('immediateCount').textContent = `${(data.mails_immediate || []).length}`;
+  document.getElementById('weeklyCount').textContent = `${(data.mails_weekly || []).length}`;
+  document.getElementById('referenceCount').textContent = `${(data.mails_reference || []).length}`;
+  document.getElementById('taskTitleCount').textContent = `${(data.tasks || []).length}`;
+  document.getElementById('immediateTitleCount').textContent = `${(data.mails_immediate || []).length}`;
+  document.getElementById('weeklyTitleCount').textContent = `${(data.mails_weekly || []).length}`;
+  document.getElementById('referenceTitleCount').textContent = `${(data.mails_reference || []).length}`;
   document.getElementById('triageSummary').textContent =
     `邮件分类统计：立刻处理 ${ (data.mails_immediate || []).length } 封，` +
     `本周待办 ${ (data.mails_weekly || []).length } 封，` +
@@ -87,7 +95,7 @@ async function loadDigest(forceRefresh = false) {
     });
   }
 
-  const renderMailList = (id, items, emptyText) => {
+  const renderMailList = (id, items, emptyText, limit = 6) => {
     const root = document.getElementById(id);
     root.innerHTML = '';
     if (!items.length) {
@@ -96,16 +104,22 @@ async function loadDigest(forceRefresh = false) {
       root.appendChild(li);
       return;
     }
-    items.forEach((mail) => {
+    const visible = items.slice(0, limit);
+    visible.forEach((mail) => {
       const li = document.createElement('li');
       li.innerHTML = `${mail.subject} - ${mail.sender} ${mail.url ? `<a href="${mail.url}" target="_blank">打开</a>` : ''}`;
       root.appendChild(li);
     });
+    if (items.length > limit) {
+      const li = document.createElement('li');
+      li.innerHTML = `<em>其余 ${items.length - limit} 条已折叠，减少噪音展示。</em>`;
+      root.appendChild(li);
+    }
   };
 
-  renderMailList('mailsImmediate', data.mails_immediate || [], '当前没有需要立刻处理的邮件');
-  renderMailList('mailsWeekly', data.mails_weekly || [], '当前没有本周待办邮件');
-  renderMailList('mailsReference', data.mails_reference || [], '当前没有信息参考邮件');
+  renderMailList('mailsImmediate', data.mails_immediate || [], '当前没有需要立刻处理的邮件', 5);
+  renderMailList('mailsWeekly', data.mails_weekly || [], '当前没有本周待办邮件', 6);
+  renderMailList('mailsReference', data.mails_reference || [], '当前没有信息参考邮件', 8);
 
   if (
     !(data.mails_immediate || []).length &&
@@ -114,7 +128,7 @@ async function loadDigest(forceRefresh = false) {
     (data.important_mails || []).length
   ) {
     // Backward-compatible fallback for older payloads.
-    renderMailList('mailsReference', data.important_mails || [], '当前没有信息参考邮件');
+    renderMailList('mailsReference', data.important_mails || [], '当前没有信息参考邮件', 8);
   }
 
 }
