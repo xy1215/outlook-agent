@@ -8,3 +8,4 @@ data/canvas_feed_cache.json
 data/llm_mail_cache.json
 data/llm_canvas_cache.json
 data/run_state.json
+data/task_state.json

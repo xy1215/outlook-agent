@@ -9,9 +9,11 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Request
+from fastapi import Depends, Header, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 
 from app.config import settings
 from app.models import DailyDigest
@@ -22,6 +24,7 @@ from app.services.mail_classifier import MailClassifier
 from app.services.notifier import Notifier
 from app.services.outlook_client import OutlookClient
 from app.services.run_state import RunStateStore
+from app.services.task_state import TaskStateStore, remaining_text, task_id
 
 canvas_client = CanvasClient(
     settings.canvas_base_url,
@@ -78,6 +81,12 @@ latest_digest: DailyDigest | None = None
 oauth_state: Optional[str] = None
 started_at = datetime.now(timezone.utc)
 run_state_store = RunStateStore(settings.run_state_path)
+task_state_store = TaskStateStore(settings.task_state_path)
+
+
+class TaskActionRequest(BaseModel):
+    task_id: str = ""
+    hours: int = 2
 
 
 async def run_daily_job(*, force_canvas_refresh: bool = True) -> dict:
@@ -85,8 +94,9 @@ async def run_daily_job(*, force_canvas_refresh: bool = True) -> dict:
     now = datetime.now(ZoneInfo(settings.timezone))
     try:
         digest = await digest_service.build(force_canvas_refresh=force_canvas_refresh)
-        latest_digest = digest
-        await notifier.send("校园每日提醒", digest_service.to_push_text(digest))
+        visible_digest = task_state_store.apply(digest, now)
+        latest_digest = visible_digest
+        await notifier.send("校园每日提醒", digest_service.to_push_text(visible_digest))
         run_state_store.record(push_sent=True, error=None, run_at=now)
         return {"push_sent": True, "run_at": now.isoformat()}
     except Exception as exc:
@@ -126,6 +136,36 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Campus Daily Agent", version="0.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+
+def _check_bot_access(x_bot_token: Optional[str] = Header(default=None)) -> None:
+    expected = (settings.bot_api_token or "").strip()
+    if expected and x_bot_token != expected:
+        raise HTTPException(status_code=401, detail="Invalid bot token")
+
+
+def _task_view(task, now: datetime) -> dict:
+    return {
+        "task_id": task_id(task),
+        "title": task.title,
+        "due_at": task.due_at.isoformat() if task.due_at else None,
+        "course": task.course,
+        "url": task.url,
+        "remaining": remaining_text(task, now),
+    }
+
+
+def _pick_task(digest: DailyDigest, req_task_id: str) -> tuple[str | None, object | None]:
+    if req_task_id:
+        for item in digest.tasks:
+            tid = task_id(item)
+            if tid == req_task_id:
+                return tid, item
+        return None, None
+    if not digest.tasks:
+        return None, None
+    top = digest.tasks[0]
+    return task_id(top), top
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -197,10 +237,73 @@ async def get_today(refresh: bool = False) -> dict:
     stale_for_today = latest_digest is not None and latest_digest.generated_at.astimezone(tz).date() < datetime.now(tz).date()
     if refresh or latest_digest is None or stale_for_today:
         latest_digest = await digest_service.build(force_canvas_refresh=bool(refresh or stale_for_today))
-    return latest_digest.model_dump(mode="json")
+    now = datetime.now(tz)
+    visible_digest = task_state_store.apply(latest_digest, now)
+    latest_digest = visible_digest
+    return visible_digest.model_dump(mode="json")
 
 
 @app.post("/api/run-now")
 async def run_now() -> dict:
     result = await run_daily_job(force_canvas_refresh=True)
     return {"ok": True, "message": "Manual run completed.", **result}
+
+
+@app.get("/api/bot/tasks", dependencies=[Depends(_check_bot_access)])
+async def bot_tasks(refresh: bool = False) -> dict:
+    data = await get_today(refresh=refresh)
+    now = datetime.now(ZoneInfo(settings.timezone))
+    digest = DailyDigest.model_validate(data)
+    return {
+        "ok": True,
+        "count": len(digest.tasks),
+        "tasks": [_task_view(task, now) for task in digest.tasks],
+    }
+
+
+@app.get("/api/bot/today", dependencies=[Depends(_check_bot_access)])
+async def bot_today(refresh: bool = False) -> dict:
+    data = await get_today(refresh=refresh)
+    digest = DailyDigest.model_validate(data)
+    now = datetime.now(ZoneInfo(settings.timezone))
+    top = _task_view(digest.tasks[0], now) if digest.tasks else None
+    return {
+        "ok": True,
+        "summary": digest.summary_text,
+        "task_count": len(digest.tasks),
+        "top_task": top,
+        "immediate_count": len(digest.mails_immediate),
+        "weekly_count": len(digest.mails_weekly),
+    }
+
+
+@app.post("/api/bot/snooze", dependencies=[Depends(_check_bot_access)])
+async def bot_snooze(req: TaskActionRequest) -> dict:
+    data = await get_today(refresh=False)
+    digest = DailyDigest.model_validate(data)
+    now = datetime.now(ZoneInfo(settings.timezone))
+    tid, task = _pick_task(digest, req.task_id.strip())
+    if tid is None or task is None:
+        return {"ok": False, "message": "No matching task found."}
+    until = task_state_store.snooze_hours(tid, req.hours, now)
+    return {
+        "ok": True,
+        "message": f"Snoozed task until {until.strftime('%Y-%m-%d %H:%M')}",
+        "task": _task_view(task, now),
+    }
+
+
+@app.post("/api/bot/done", dependencies=[Depends(_check_bot_access)])
+async def bot_done(req: TaskActionRequest) -> dict:
+    data = await get_today(refresh=False)
+    digest = DailyDigest.model_validate(data)
+    now = datetime.now(ZoneInfo(settings.timezone))
+    tid, task = _pick_task(digest, req.task_id.strip())
+    if tid is None or task is None:
+        return {"ok": False, "message": "No matching task found."}
+    task_state_store.mark_done(tid, now)
+    return {
+        "ok": True,
+        "message": "Task marked done.",
+        "task": _task_view(task, now),
+    }

@@ -8,6 +8,7 @@
 - 生成每日摘要并推送到 iPhone（Pushover）
 - Outlook 使用 Delegated OAuth 登录，无需申请 Application Mail.Read 管理员审批
 - 提供一个可交互图形页面查看详情和手动触发
+- 提供实验性双向命令接口（给 Discord Bot/Telegram Bot 调用）
 
 ## 1. 快速启动
 
@@ -75,6 +76,8 @@ uvicorn app.main:app --reload --port 8000
 - `LLM_MAIL_MAX_CALLS_PER_RUN=8` 单次运行最多邮件 LLM 调用
 - `LLM_CANVAS_MAX_CALLS_PER_RUN=24` 单次运行最多 Canvas 任务 LLM 调用
 - `LLM_CACHE_TTL_HOURS=72` LLM 结果缓存时间，减少重复调用
+- `TASK_STATE_PATH=data/task_state.json` 存储任务 done/snooze 状态
+- `BOT_API_TOKEN` bot 调用后端 API 的鉴权 token（推荐填写）
 
 ## 4. Web 页面功能
 
@@ -98,3 +101,32 @@ uvicorn app.main:app --reload --port 8000
 
 - 本地会保存 Microsoft refresh token 到 `data/ms_token.json`，请勿泄露该文件。
 - 本项目是 MVP，未包含完整鉴权、审计、重试和告警链路。
+
+## 7. Discord 双向命令（实验）
+
+### 启用后端命令 API
+后端已提供：
+- `GET /api/bot/today`
+- `GET /api/bot/tasks`
+- `POST /api/bot/snooze` (body: `{"hours":2,"task_id":"..."}`，`task_id` 可空，默认最近任务)
+- `POST /api/bot/done` (body: `{"task_id":"..."}`，`task_id` 可空，默认最近任务)
+
+若配置了 `BOT_API_TOKEN`，调用时需带请求头：`X-Bot-Token: <BOT_API_TOKEN>`。
+
+### 运行 Discord Bot
+```bash
+source .venv/bin/activate
+python -m app.bot.discord_bot
+```
+
+需要配置：
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_BOT_API_BASE`（默认 `http://127.0.0.1:8000`）
+- `BOT_API_TOKEN`（若后端开启鉴权）
+- 可选：`DISCORD_BOT_GUILD_ID`（仅同步到指定服务器，命令生效更快）
+
+可用 Slash Commands：
+- `/today`
+- `/tasks`
+- `/snooze hours:<n> [task_id]`
+- `/done [task_id]`

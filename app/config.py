@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     ms_redirect_uri: str = Field(default="http://127.0.0.1:8000/auth/callback", alias="MS_REDIRECT_URI")
     ms_token_store_path: str = Field(default="data/ms_token.json", alias="MS_TOKEN_STORE_PATH")
     run_state_path: str = Field(default="data/run_state.json", alias="RUN_STATE_PATH")
+    task_state_path: str = Field(default="data/task_state.json", alias="TASK_STATE_PATH")
 
     push_provider: str = Field(default="pushover", alias="PUSH_PROVIDER")
     pushover_app_token: str = Field(default="", alias="PUSHOVER_APP_TOKEN")
@@ -43,6 +44,10 @@ class Settings(BaseSettings):
     llm_cache_ttl_hours: int = Field(default=72, alias="LLM_CACHE_TTL_HOURS")
     llm_mail_cache_path: str = Field(default="data/llm_mail_cache.json", alias="LLM_MAIL_CACHE_PATH")
     llm_canvas_cache_path: str = Field(default="data/llm_canvas_cache.json", alias="LLM_CANVAS_CACHE_PATH")
+
+    bot_api_token: str = Field(default="", alias="BOT_API_TOKEN")
+    discord_bot_token: str = Field(default="", alias="DISCORD_BOT_TOKEN")
+    discord_bot_api_base: str = Field(default="http://127.0.0.1:8000", alias="DISCORD_BOT_API_BASE")
 
 
 settings = Settings()
