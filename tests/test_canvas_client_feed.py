@@ -35,3 +35,23 @@ END:VCALENDAR
     assert tasks[0].due_at is not None
     assert tasks[0].due_at.hour == 23
     assert tasks[0].due_at.minute == 59
+
+
+def test_fetch_todo_force_refresh_bypasses_cache(tmp_path):
+    cache_file = str(tmp_path / "canvas_cache.json")
+    client = CanvasClient("", "", "https://example.com/feed.ics", "America/Los_Angeles", cache_file, 24)
+    calls = [0]
+
+    async def fake_fetch():
+        calls[0] += 1
+        return []
+
+    client._fetch_canvas_feed_now = fake_fetch  # type: ignore[method-assign]
+    # First fetch populates cache.
+    import asyncio
+    asyncio.run(client.fetch_todo(force_refresh=False))
+    # Second fetch without force should hit cache.
+    asyncio.run(client.fetch_todo(force_refresh=False))
+    # Third fetch with force should fetch again.
+    asyncio.run(client.fetch_todo(force_refresh=True))
+    assert calls[0] == 2
