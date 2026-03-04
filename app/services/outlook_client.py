@@ -19,6 +19,7 @@ class OutlookClient:
         user_email: str,
         redirect_uri: str,
         token_store_path: str,
+        cache_ttl_sec: int = 60,
     ) -> None:
         self.tenant_id = tenant_id
         self.client_id = client_id
@@ -27,6 +28,8 @@ class OutlookClient:
         self.redirect_uri = redirect_uri
         self.token_store = TokenStore(token_store_path)
         self.scope = "offline_access Mail.Read User.Read openid profile"
+        self.cache_ttl_sec = max(cache_ttl_sec, 0)
+        self._messages_cache: dict[int, tuple[float, list[MailItem]]] = {}
 
     def is_configured(self) -> bool:
         return bool(self.tenant_id and self.client_id and self.client_secret and self.redirect_uri)
@@ -104,10 +107,24 @@ class OutlookClient:
             return None
         return await self._refresh_access_token(refresh_token)
 
-    async def fetch_recent_messages(self, max_count: int = 20) -> list[MailItem]:
-        token = await self._get_access_token()
-        if not token:
-            return []
+    def _cache_get(self, max_count: int) -> list[MailItem] | None:
+        if self.cache_ttl_sec <= 0:
+            return None
+        hit = self._messages_cache.get(max_count)
+        if not hit:
+            return None
+        ts, rows = hit
+        if time.time() - ts > self.cache_ttl_sec:
+            self._messages_cache.pop(max_count, None)
+            return None
+        return rows
+
+    def _cache_set(self, max_count: int, rows: list[MailItem]) -> None:
+        if self.cache_ttl_sec <= 0:
+            return
+        self._messages_cache[max_count] = (time.time(), rows)
+
+    async def _fetch_messages_rows(self, token: str, max_count: int) -> list[dict]:
         graph_url = (
             "https://graph.microsoft.com/v1.0/me/messages"
             f"?$top={max_count}"
@@ -127,7 +144,19 @@ class OutlookClient:
                 headers = {"Authorization": f"Bearer {refreshed}"}
                 resp = await client.get(graph_url, headers=headers)
             resp.raise_for_status()
-            rows = resp.json().get("value", [])
+            return resp.json().get("value", [])
+
+    async def fetch_recent_messages(self, max_count: int = 20, use_cache: bool = True) -> list[MailItem]:
+        if use_cache:
+            cached = self._cache_get(max_count)
+            if cached is not None:
+                return cached
+
+        token = await self._get_access_token()
+        if not token:
+            return []
+
+        rows = await self._fetch_messages_rows(token, max_count)
 
         items: list[MailItem] = []
         for row in rows:
@@ -144,10 +173,14 @@ class OutlookClient:
                     url=row.get("webLink"),
                 )
             )
+
+        self._cache_set(max_count, items)
         return items
 
     def disconnect(self) -> None:
         self.token_store.clear()
+        self._messages_cache.clear()
+
     @staticmethod
     def _strip_html(html: str) -> str:
         if not html:

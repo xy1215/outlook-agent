@@ -2,8 +2,9 @@
 
 一个个人智能 agent 原型：
 - 每天固定时间抓取 Outlook 学校邮箱并识别重要信息
-- 从 Canvas 通知邮件中提取作业/截止时间（主来源）
-- Canvas API 为可选增强（可不配置）
+- 使用 LLM 将邮件分为：立刻处理 / 本周待办 / 信息参考
+- 待办任务仅来自 Canvas Calendar feed（`.ics`）
+- 使用 LLM 对 Canvas 日历事件进行筛选，只保留需要完成的作业/任务
 - 生成每日摘要并推送到 iPhone（Pushover）
 - Outlook 使用 Delegated OAuth 登录，无需申请 Application Mail.Read 管理员审批
 - 提供一个可交互图形页面查看详情和手动触发
@@ -24,15 +25,16 @@ uvicorn app.main:app --reload --port 8000
 ## 2. 你需要准备的账号/API
 
 ### Canvas
-1. 登录 Canvas -> `Account -> Settings`
-2. 在 `Approved Integrations` 生成 Access Token
+1. 登录 Canvas -> `Calendar` -> `Calendar Feed`
+2. 复制你的 `.ics` 订阅链接
 3. 填入:
-- `CANVAS_BASE_URL` (例如 `https://xxx.instructure.com`)
-- `CANVAS_TOKEN`
+- `CANVAS_CALENDAR_FEED_URL`
+- `CANVAS_FEED_CACHE_PATH`（默认 `data/canvas_feed_cache.json`）
+- `CANVAS_FEED_REFRESH_HOURS`（默认 24）
 
 可选说明：
-- 如果 `CANVAS_TOKEN` 留空，系统会自动跳过 Canvas API，不会报错。
-- 此时任务主要来自 Outlook 里 Canvas 通知邮件解析。
+- 系统每 24 小时刷新一次 feed 缓存；刷新失败时会回退到最近一次缓存结果，避免任务列表为空。
+- 当前版本不再从邮件中提取待办任务。
 
 ### Outlook (Microsoft Graph, Delegated)
 1. 在 Azure Portal 注册应用
@@ -63,17 +65,27 @@ uvicorn app.main:app --reload --port 8000
 
 - `SCHEDULE_TIME=07:30` 表示每天早上 07:30 推送
 - `TIMEZONE=America/Los_Angeles`
-- `TASK_MODE=action_only` 只保留可行动任务（建议）
-- `TASK_NOISE_KEYWORDS` 过滤噪音通知（如 Assignment Graded）
+- `CANVAS_CALENDAR_FEED_URL` Canvas 日历 feed 链接（待办唯一来源）
+- `CANVAS_FEED_REFRESH_HOURS=24` 每 24 小时更新 feed 缓存
 - `TASK_REQUIRE_DUE=true` 左栏仅展示带截止日期的任务
 - `PUSH_DUE_WITHIN_HOURS=48` 仅推送 48 小时内截止任务
+- `PUSH_PERSONA=auto` 到期任务推送风格（`auto/senior/cute`）
+- `LLM_API_KEY` + `LLM_MODEL` 用于 Canvas 日历事件分类（作业任务 vs 通知/announcement）
+- `LLM_MAIL_ENABLED=false` 默认关闭邮件分诊 LLM（建议先关，省 token）
+- `LLM_MAIL_MAX_CALLS_PER_RUN=8` 单次运行最多邮件 LLM 调用
+- `LLM_CANVAS_MAX_CALLS_PER_RUN=24` 单次运行最多 Canvas 任务 LLM 调用
+- `LLM_CACHE_TTL_HOURS=72` LLM 结果缓存时间，减少重复调用
 
 ## 4. Web 页面功能
 
 - `连接 Outlook`: 首次授权 Microsoft 账号
 - `断开 Outlook`: 删除本地 token，重新授权
-- `刷新摘要`: 读取并展示当天数据
+- `刷新摘要`: 强制重新计算今日摘要（会更新 generated_at）
 - `立即执行并推送`: 立即拉取 Outlook（和可选 Canvas）并发 iPhone 推送
+- 页面将按「立刻处理 / 本周待办 / 信息参考」展示邮件分诊结果
+- 页面单独展示即将到期催办文案（当前风格/学姐风/可爱风）
+- 待办任务列表显示“剩余 X 小时 Y 分钟”（进度条保留，公式 `(当前时间-发布时间)/(截止时间-发布时间)`）
+- 距离 DDL <= 6 小时时进度条强制红色 `#FF0000` 并显示呼吸灯
 
 ## 5. 后续升级建议
 
