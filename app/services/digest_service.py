@@ -152,10 +152,8 @@ class DigestService:
             published_at = task.due_at - span
             if published_at > now:
                 published_at = now
-            task.published_at = published_at
-            return task
-        task.published_at = now
-        return task
+            return task.model_copy(update={"published_at": published_at})
+        return task.model_copy(update={"published_at": now})
 
     @staticmethod
     def _fallback_is_actionable_canvas_task(task: TaskItem) -> bool:
@@ -279,7 +277,7 @@ class DigestService:
         self._save_canvas_cache()
         return keep
 
-    async def build(self) -> DailyDigest:
+    async def build(self, force_canvas_refresh: bool = False) -> DailyDigest:
         now = datetime.now(ZoneInfo(self.timezone_name))
         try:
             mails = await self.outlook_client.fetch_recent_messages()
@@ -288,7 +286,7 @@ class DigestService:
 
         canvas_tasks: list[TaskItem] = []
         try:
-            canvas_tasks = await self.canvas_client.fetch_todo()
+            canvas_tasks = await self.canvas_client.fetch_todo(force_refresh=force_canvas_refresh)
         except Exception:
             # Canvas feed is optional.
             canvas_tasks = []

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import httpx
 
+_PUSHOVER_MAX_MESSAGE = 1024
+
 
 class Notifier:
     def __init__(self, provider: str, app_token: str, user_key: str) -> None:
@@ -14,6 +16,9 @@ class Notifier:
             raise ValueError(f"Unsupported provider: {self.provider}")
         if not self.app_token or not self.user_key:
             raise ValueError("Pushover credentials are missing")
+
+        if len(message) > _PUSHOVER_MAX_MESSAGE:
+            message = message[: _PUSHOVER_MAX_MESSAGE - 1] + "…"
 
         url = "https://api.pushover.net/1/messages.json"
         payload = {
