@@ -165,13 +165,17 @@ class CanvasClient:
             resp.raise_for_status()
         return self._parse_ics_tasks(resp.text)
 
-    async def fetch_todo(self) -> list[TaskItem]:
+    async def fetch_todo(self, force_refresh: bool = False) -> list[TaskItem]:
         if not self.calendar_feed_url:
             return []
 
         now = datetime.now(ZoneInfo("UTC"))
         fetched_at, cached_tasks = self._load_cache()
-        if fetched_at is not None and now - fetched_at < timedelta(hours=self.feed_refresh_hours):
+        if (
+            not force_refresh
+            and fetched_at is not None
+            and now - fetched_at < timedelta(hours=self.feed_refresh_hours)
+        ):
             return cached_tasks
 
         try:
