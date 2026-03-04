@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import os
 import secrets
-from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -20,10 +22,6 @@ from app.services.mail_classifier import MailClassifier
 from app.services.notifier import Notifier
 from app.services.outlook_client import OutlookClient
 from app.services.run_state import RunStateStore
-
-app = FastAPI(title="Campus Daily Agent", version="0.1.0")
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
 
 canvas_client = CanvasClient(
     settings.canvas_base_url,
@@ -78,54 +76,56 @@ digest_service = DigestService(
 scheduler = create_scheduler(settings.timezone)
 latest_digest: DailyDigest | None = None
 oauth_state: Optional[str] = None
-started_at = datetime.utcnow()
+started_at = datetime.now(timezone.utc)
 run_state_store = RunStateStore(settings.run_state_path)
 
 
-def _today_label(now_local: datetime) -> str:
-    return now_local.strftime("%Y-%m-%d")
-
-
-def _is_digest_stale(digest: DailyDigest | None, now_local: datetime) -> bool:
-    if digest is None:
-        return True
-    return digest.date_label != _today_label(now_local)
+async def run_daily_job(*, force_canvas_refresh: bool = True) -> dict:
+    global latest_digest
+    now = datetime.now(ZoneInfo(settings.timezone))
+    try:
+        digest = await digest_service.build(force_canvas_refresh=force_canvas_refresh)
+        latest_digest = digest
+        await notifier.send("校园每日提醒", digest_service.to_push_text(digest))
+        run_state_store.record(push_sent=True, error=None, run_at=now)
+        return {"push_sent": True, "run_at": now.isoformat()}
+    except Exception as exc:
+        run_state_store.record(push_sent=False, error=str(exc), run_at=now)
+        return {"push_sent": False, "error": str(exc), "run_at": now.isoformat()}
 
 
 def _should_backfill_push(now_local: datetime) -> bool:
-    hour, minute = parse_schedule_time(settings.schedule_time)
-    if (now_local.hour, now_local.minute) < (hour, minute):
-        return False
     state = run_state_store.load()
-    return state.get("last_push_date") != now_local.date().isoformat()
-
-
-async def run_daily_job() -> dict:
-    global latest_digest
-    now_local = datetime.now(ZoneInfo(settings.timezone))
-    digest = await digest_service.build()
-    latest_digest = digest
+    hour, minute = parse_schedule_time(settings.schedule_time)
+    schedule_dt = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if now_local < schedule_dt:
+        return False
+    raw = state.get("last_success_at")
+    if not isinstance(raw, str) or not raw:
+        return True
     try:
-        await notifier.send("校园每日提醒", digest_service.to_push_text(digest))
-        run_state_store.record(run_at=now_local, push_sent=True)
-        return {"push_sent": True, "generated_at": digest.generated_at.isoformat()}
-    except Exception as exc:
-        run_state_store.record(run_at=now_local, push_sent=False, error=str(exc))
-        return {"push_sent": False, "error": str(exc), "generated_at": digest.generated_at.isoformat()}
+        last_success = datetime.fromisoformat(raw)
+    except ValueError:
+        return True
+    if last_success.tzinfo is None:
+        last_success = last_success.replace(tzinfo=ZoneInfo(settings.timezone))
+    return last_success.astimezone(ZoneInfo(settings.timezone)).date() < now_local.date()
 
 
-@app.on_event("startup")
-async def startup_event() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     scheduler.add_job(run_daily_job, daily_trigger(settings.schedule_time, settings.timezone), id="daily_digest", replace_existing=True)
     scheduler.start()
     now_local = datetime.now(ZoneInfo(settings.timezone))
     if _should_backfill_push(now_local):
-        await run_daily_job()
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
+        asyncio.create_task(run_daily_job(force_canvas_refresh=True))
+    yield
     scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="Campus Daily Agent", version="0.1.0", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -147,12 +147,11 @@ async def health() -> dict:
     return {
         "ok": True,
         "pid": os.getpid(),
-        "started_at_utc": started_at.isoformat() + "Z",
-        "now_utc": datetime.utcnow().isoformat() + "Z",
-        "last_run_at": state.get("last_run_at"),
-        "last_success_at": state.get("last_success_at"),
-        "last_push_at": state.get("last_push_at"),
-        "last_error": state.get("last_error"),
+        "started_at_utc": started_at.isoformat(),
+        "now_utc": datetime.now(timezone.utc).isoformat(),
+        "last_run_at": state.get("last_run_at", ""),
+        "last_success_at": state.get("last_success_at", ""),
+        "last_error": state.get("last_error", ""),
     }
 
 
@@ -194,13 +193,14 @@ async def auth_logout() -> dict:
 @app.get("/api/today")
 async def get_today(refresh: bool = False) -> dict:
     global latest_digest
-    now_local = datetime.now(ZoneInfo(settings.timezone))
-    if refresh or _is_digest_stale(latest_digest, now_local):
-        latest_digest = await digest_service.build()
+    tz = ZoneInfo(settings.timezone)
+    stale_for_today = latest_digest is not None and latest_digest.generated_at.astimezone(tz).date() < datetime.now(tz).date()
+    if refresh or latest_digest is None or stale_for_today:
+        latest_digest = await digest_service.build(force_canvas_refresh=bool(refresh or stale_for_today))
     return latest_digest.model_dump(mode="json")
 
 
 @app.post("/api/run-now")
 async def run_now() -> dict:
-    result = await run_daily_job()
+    result = await run_daily_job(force_canvas_refresh=True)
     return {"ok": True, "message": "Manual run completed.", **result}

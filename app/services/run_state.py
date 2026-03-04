@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -14,18 +14,21 @@ class RunStateStore:
         if not self.path.exists():
             return {}
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
         except Exception:
             return {}
 
-    def record(self, *, run_at: datetime, push_sent: bool, error: str | None = None) -> None:
-        state = self.load()
-        run_at_iso = run_at.isoformat()
-        state["last_run_at"] = run_at_iso
-        state["last_error"] = error
-        if push_sent:
-            state["last_success_at"] = run_at_iso
-            state["last_push_at"] = run_at_iso
-            state["last_push_date"] = run_at.date().isoformat()
+    def save(self, payload: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def record(self, *, push_sent: bool, error: str | None, run_at: datetime) -> dict[str, Any]:
+        current = self.load()
+        current["last_run_at"] = run_at.isoformat()
+        current["last_push_sent"] = bool(push_sent)
+        current["last_error"] = error or ""
+        if push_sent:
+            current["last_success_at"] = run_at.isoformat()
+        self.save(current)
+        return current

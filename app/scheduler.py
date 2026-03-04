@@ -9,8 +9,14 @@ def create_scheduler(timezone_name: str) -> AsyncIOScheduler:
 
 
 def parse_schedule_time(schedule_time: str) -> tuple[int, int]:
-    hour_str, minute_str = schedule_time.split(":", 1)
-    return int(hour_str), int(minute_str)
+    try:
+        hour_str, minute_str = (schedule_time or "").split(":", 1)
+        hour, minute = int(hour_str), int(minute_str)
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"Invalid SCHEDULE_TIME '{schedule_time}': expected HH:MM format") from exc
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValueError(f"Invalid SCHEDULE_TIME '{schedule_time}': hour must be 0-23, minute 0-59")
+    return hour, minute
 
 
 def daily_trigger(schedule_time: str, timezone_name: str) -> CronTrigger:

@@ -137,7 +137,11 @@ class OutlookClient:
             resp = await client.get(graph_url, headers=headers)
             if resp.status_code == 401:
                 token_data = self.token_store.load() or {}
-                refreshed = await self._refresh_access_token(token_data.get("refresh_token", ""))
+                refresh_token = token_data.get("refresh_token") or ""
+                if not refresh_token:
+                    self.token_store.clear()
+                    return []
+                refreshed = await self._refresh_access_token(refresh_token)
                 if not refreshed:
                     self.token_store.clear()
                     return []
