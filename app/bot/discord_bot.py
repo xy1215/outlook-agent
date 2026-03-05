@@ -127,12 +127,14 @@ class CampusBot(discord.Client):
             cmd = "today"
         elif re.search(r"(^|\s)[!/]*tasks(\s|$)", text):
             cmd = "tasks"
-        # Text mode requires mention, unless user sends plain shortcut command directly.
+        # For bridge bots, allow command keyword without strict mention parsing.
         plain_shortcuts = {"today", "/today", "!today", "tasks", "/tasks", "!tasks"}
-        should_process = (mentioned and cmd in {"today", "tasks"}) or (text in plain_shortcuts)
-        if mentioned:
+        should_process = is_bridge_bot and cmd in {"today", "tasks"}
+        if not should_process:
+            should_process = (mentioned and cmd in {"today", "tasks"}) or (text in plain_shortcuts)
+        if mentioned or is_bridge_bot:
             print(
-                f"on_message mention: author={message.author} id={message.author.id} bot={message.author.bot} text={text!r} cmd={cmd!r} process={should_process}",
+                f"on_message seen: author={message.author} id={message.author.id} bot={message.author.bot} bridge={is_bridge_bot} mentioned={mentioned} text={text!r} cmd={cmd!r} process={should_process}",
                 flush=True,
             )
         if not should_process:
