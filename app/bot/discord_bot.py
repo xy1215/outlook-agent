@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import re
 
 import discord
 import httpx
@@ -71,6 +72,7 @@ async def _api_post(path: str, payload: dict) -> dict:
 class CampusBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
+        intents.messages = True
         intents.message_content = ENABLE_MESSAGE_CONTENT
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
@@ -113,17 +115,30 @@ class CampusBot(discord.Client):
         is_bridge_bot = message.author.bot and (ALLOW_ALL_BOT_BRIDGE or str(message.author.id) in BRIDGE_BOT_IDS)
         if message.author.bot and not is_bridge_bot:
             return
+        mentioned = self.user in getattr(message, "mentions", [])
         content = (message.content or "").strip()
         mention_tokens = {f"<@{self.user.id}>", f"<@!{self.user.id}>"}
         for token in mention_tokens:
             content = content.replace(token, " ")
         text = content.strip().lower()
         text = " ".join(text.split())
-        commands = {"today", "/today", "!today", "bot today", "tasks", "/tasks", "!tasks", "bot tasks"}
-        if text not in commands:
+        cmd = ""
+        if re.search(r"(^|\s)[!/]*today(\s|$)", text):
+            cmd = "today"
+        elif re.search(r"(^|\s)[!/]*tasks(\s|$)", text):
+            cmd = "tasks"
+        # Text mode requires mention, unless user sends plain shortcut command directly.
+        plain_shortcuts = {"today", "/today", "!today", "tasks", "/tasks", "!tasks"}
+        should_process = (mentioned and cmd in {"today", "tasks"}) or (text in plain_shortcuts)
+        if mentioned:
+            print(
+                f"on_message mention: author={message.author} id={message.author.id} bot={message.author.bot} text={text!r} cmd={cmd!r} process={should_process}",
+                flush=True,
+            )
+        if not should_process:
             return
         try:
-            if "today" in text:
+            if cmd == "today" or "today" in text:
                 data = await _api_get("/api/bot/today")
                 top = data.get("top_task")
                 lines = [
