@@ -122,6 +122,8 @@ python -m app.bot.discord_bot
 需要配置：
 - `DISCORD_BOT_TOKEN`
 - `DISCORD_BOT_API_BASE`（默认 `http://127.0.0.1:8000`）
+- `DISCORD_BRIDGE_BOT_IDS`（可选，逗号分隔 bot user id；允许这些 bot 通过文本指令桥接调用）
+- `DISCORD_ENABLE_MESSAGE_CONTENT`（桥接文本命令需要设为 `true`，并在 Discord Developer Portal 打开 Message Content Intent）
 - `BOT_API_TOKEN`（若后端开启鉴权）
 - 可选：`DISCORD_BOT_GUILD_ID`（仅同步到指定服务器，命令生效更快）
 
@@ -130,3 +132,7 @@ python -m app.bot.discord_bot
 - `/tasks`
 - `/snooze hours:<n> [task_id]`
 - `/done [task_id]`
+
+Bot 桥接调用（给另一个 bot 用）：
+- 在频道发：`@页面通信-bot /today` 或 `@页面通信-bot /tasks`
+- 仅当发送方 bot id 在 `DISCORD_BRIDGE_BOT_IDS` 白名单中时生效

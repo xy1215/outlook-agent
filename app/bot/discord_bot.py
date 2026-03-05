@@ -15,6 +15,12 @@ API_TOKEN = os.getenv("BOT_API_TOKEN", "")
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 GUILD_ID = os.getenv("DISCORD_BOT_GUILD_ID", "").strip()
 AUTO_SYNC_ALL_GUILDS = os.getenv("DISCORD_BOT_AUTO_SYNC_ALL_GUILDS", "true").strip().lower() in {"1", "true", "yes", "on"}
+BRIDGE_BOT_IDS = {
+    x.strip()
+    for x in os.getenv("DISCORD_BRIDGE_BOT_IDS", "").split(",")
+    if x.strip()
+}
+ENABLE_MESSAGE_CONTENT = os.getenv("DISCORD_ENABLE_MESSAGE_CONTENT", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _api_bases() -> list[str]:
@@ -64,6 +70,7 @@ async def _api_post(path: str, payload: dict) -> dict:
 class CampusBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
+        intents.message_content = ENABLE_MESSAGE_CONTENT
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
 
@@ -79,6 +86,7 @@ class CampusBot(discord.Client):
 
     async def on_ready(self) -> None:
         print(f"Discord bot ready as {self.user} (guilds={len(self.guilds)})", flush=True)
+        print(f"Message content intent enabled: {ENABLE_MESSAGE_CONTENT}", flush=True)
         print(f"Bot API base candidates: {', '.join(_api_bases())}", flush=True)
         try:
             ping = await _api_get("/api/health")
@@ -97,10 +105,19 @@ class CampusBot(discord.Client):
                 print(f"Guild sync failed for {guild.id}: {exc}", flush=True)
 
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot:
+        if self.user is None:
             return
-        text = (message.content or "").strip().lower()
-        if text not in {"today", "tasks", "!today", "!tasks", "bot today", "bot tasks"}:
+        is_bridge_bot = message.author.bot and str(message.author.id) in BRIDGE_BOT_IDS
+        if message.author.bot and not is_bridge_bot:
+            return
+        content = (message.content or "").strip()
+        mention_tokens = {f"<@{self.user.id}>", f"<@!{self.user.id}>"}
+        for token in mention_tokens:
+            content = content.replace(token, " ")
+        text = content.strip().lower()
+        text = " ".join(text.split())
+        commands = {"today", "/today", "!today", "bot today", "tasks", "/tasks", "!tasks", "bot tasks"}
+        if text not in commands:
             return
         try:
             if "today" in text:
