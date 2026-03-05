@@ -20,6 +20,7 @@ BRIDGE_BOT_IDS = {
     for x in os.getenv("DISCORD_BRIDGE_BOT_IDS", "").split(",")
     if x.strip()
 }
+ALLOW_ALL_BOT_BRIDGE = os.getenv("DISCORD_ALLOW_ALL_BOT_BRIDGE", "false").strip().lower() in {"1", "true", "yes", "on"}
 ENABLE_MESSAGE_CONTENT = os.getenv("DISCORD_ENABLE_MESSAGE_CONTENT", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -87,6 +88,8 @@ class CampusBot(discord.Client):
     async def on_ready(self) -> None:
         print(f"Discord bot ready as {self.user} (guilds={len(self.guilds)})", flush=True)
         print(f"Message content intent enabled: {ENABLE_MESSAGE_CONTENT}", flush=True)
+        print(f"Allow all bot bridge: {ALLOW_ALL_BOT_BRIDGE}", flush=True)
+        print(f"Bridge bot ids: {', '.join(sorted(BRIDGE_BOT_IDS)) if BRIDGE_BOT_IDS else '(none)'}", flush=True)
         print(f"Bot API base candidates: {', '.join(_api_bases())}", flush=True)
         try:
             ping = await _api_get("/api/health")
@@ -107,7 +110,7 @@ class CampusBot(discord.Client):
     async def on_message(self, message: discord.Message) -> None:
         if self.user is None:
             return
-        is_bridge_bot = message.author.bot and str(message.author.id) in BRIDGE_BOT_IDS
+        is_bridge_bot = message.author.bot and (ALLOW_ALL_BOT_BRIDGE or str(message.author.id) in BRIDGE_BOT_IDS)
         if message.author.bot and not is_bridge_bot:
             return
         content = (message.content or "").strip()
