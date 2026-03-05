@@ -4,6 +4,9 @@ import os
 import discord
 import httpx
 from discord import app_commands
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 API_BASE = os.getenv("DISCORD_BOT_API_BASE", "http://127.0.0.1:8000").rstrip("/")
