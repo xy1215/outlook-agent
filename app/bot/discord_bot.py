@@ -6,7 +6,8 @@ import httpx
 from discord import app_commands
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure local .env takes precedence over shell leftovers for local runs.
+load_dotenv(override=True)
 
 
 API_BASE = os.getenv("DISCORD_BOT_API_BASE", "http://127.0.0.1:8000").rstrip("/")
@@ -14,6 +15,15 @@ API_TOKEN = os.getenv("BOT_API_TOKEN", "")
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 GUILD_ID = os.getenv("DISCORD_BOT_GUILD_ID", "").strip()
 AUTO_SYNC_ALL_GUILDS = os.getenv("DISCORD_BOT_AUTO_SYNC_ALL_GUILDS", "true").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _api_bases() -> list[str]:
+    bases = [API_BASE]
+    fallbacks = ["http://127.0.0.1:8000", "http://localhost:8000"]
+    for item in fallbacks:
+        if item not in bases:
+            bases.append(item)
+    return bases
 
 
 def _headers() -> dict[str, str]:
@@ -24,17 +34,31 @@ def _headers() -> dict[str, str]:
 
 
 async def _api_get(path: str) -> dict:
+    last_exc: Exception | None = None
     async with httpx.AsyncClient(timeout=8) as client:
-        resp = await client.get(f"{API_BASE}{path}", headers=_headers())
-        resp.raise_for_status()
-        return resp.json()
+        for base in _api_bases():
+            try:
+                resp = await client.get(f"{base}{path}", headers=_headers())
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as exc:
+                last_exc = exc
+                continue
+    raise RuntimeError(f"Bot API GET failed for {path}; tried: {', '.join(_api_bases())}; last_error={last_exc}")
 
 
 async def _api_post(path: str, payload: dict) -> dict:
+    last_exc: Exception | None = None
     async with httpx.AsyncClient(timeout=8) as client:
-        resp = await client.post(f"{API_BASE}{path}", json=payload, headers=_headers())
-        resp.raise_for_status()
-        return resp.json()
+        for base in _api_bases():
+            try:
+                resp = await client.post(f"{base}{path}", json=payload, headers=_headers())
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as exc:
+                last_exc = exc
+                continue
+    raise RuntimeError(f"Bot API POST failed for {path}; tried: {', '.join(_api_bases())}; last_error={last_exc}")
 
 
 class CampusBot(discord.Client):
@@ -55,6 +79,12 @@ class CampusBot(discord.Client):
 
     async def on_ready(self) -> None:
         print(f"Discord bot ready as {self.user} (guilds={len(self.guilds)})", flush=True)
+        print(f"Bot API base candidates: {', '.join(_api_bases())}", flush=True)
+        try:
+            ping = await _api_get("/api/health")
+            print(f"Bot API health OK: pid={ping.get('pid')} now={ping.get('now_utc')}", flush=True)
+        except Exception as exc:
+            print(f"Bot API health failed at startup: {exc}", flush=True)
         if GUILD_ID or not AUTO_SYNC_ALL_GUILDS:
             return
         # Guild sync makes slash commands appear quickly without waiting for global propagation.
