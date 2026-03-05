@@ -13,6 +13,7 @@ API_BASE = os.getenv("DISCORD_BOT_API_BASE", "http://127.0.0.1:8000").rstrip("/"
 API_TOKEN = os.getenv("BOT_API_TOKEN", "")
 DISCORD_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 GUILD_ID = os.getenv("DISCORD_BOT_GUILD_ID", "").strip()
+AUTO_SYNC_ALL_GUILDS = os.getenv("DISCORD_BOT_AUTO_SYNC_ALL_GUILDS", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _headers() -> dict[str, str]:
@@ -43,12 +44,56 @@ class CampusBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self) -> None:
+        print("setup_hook: syncing commands...", flush=True)
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
         else:
             await self.tree.sync()
+        print("setup_hook: command sync done", flush=True)
+
+    async def on_ready(self) -> None:
+        print(f"Discord bot ready as {self.user} (guilds={len(self.guilds)})", flush=True)
+        if GUILD_ID or not AUTO_SYNC_ALL_GUILDS:
+            return
+        # Guild sync makes slash commands appear quickly without waiting for global propagation.
+        for guild in self.guilds:
+            try:
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+                print(f"Synced commands to guild: {guild.name} ({guild.id})", flush=True)
+            except Exception as exc:
+                print(f"Guild sync failed for {guild.id}: {exc}", flush=True)
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot:
+            return
+        text = (message.content or "").strip().lower()
+        if text not in {"today", "tasks", "!today", "!tasks", "bot today", "bot tasks"}:
+            return
+        try:
+            if "today" in text:
+                data = await _api_get("/api/bot/today")
+                top = data.get("top_task")
+                lines = [
+                    f"Summary: {data.get('summary', '')}",
+                    f"Tasks: {data.get('task_count', 0)} | Immediate: {data.get('immediate_count', 0)} | Weekly: {data.get('weekly_count', 0)}",
+                ]
+                if top:
+                    lines.append(f"Top: {top.get('title')} ({top.get('remaining')})")
+                    lines.append(f"task_id: `{top.get('task_id')}`")
+                await message.reply("\n".join(lines), mention_author=False)
+            else:
+                data = await _api_get("/api/bot/tasks")
+                tasks = data.get("tasks", [])
+                if not tasks:
+                    await message.reply("No active tasks.", mention_author=False)
+                    return
+                lines = [f"- `{t['task_id']}` {t['title']} | {t['remaining']}" for t in tasks[:8]]
+                await message.reply("\n".join(lines), mention_author=False)
+        except Exception as exc:
+            await message.reply(f"Bot error: {exc}", mention_author=False)
 
 
 bot = CampusBot()
